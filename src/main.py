@@ -1,28 +1,21 @@
 from algorithms.PIME_PPO import PIME_PPO
 # from CustomEnv.WaterTankEnv import WaterTankENv
 # from CustomEnv.PHEnv import PHENv
-from generic_env import SetPointEnv
+from algorithms.wrappers.DictToArray import DictToArrayWrapper
+from enums.TerminationRule import TerminationRule
+from enums.ErrorFormula import ErrorFormula
+
+from modules.Ensemble import Ensemble
+from modules.Scheduller import Scheduller
+
+from set_point_env import SetPointEnv
 
 import gymnasium
 import numpy as np
 from stable_baselines3 import PPO
 
-from base.Ensemble import Ensemble
-from base.Enums import NamedPoint
-from base.Scheduller import Scheduller
-
-"""
-l1_t, l2_t -> Nível da água;
-a1, a2 -> Áreas dos buracos;
-A1, A2 -> Áreas da seção transversal;
-K_pump -> Constante da bomba d'água;
-u_t -> Ação; Voltagem aplicada a bomba d'água; 
-"""
-def simulation_model(u_t, l1_t, l2_t, /, g, p1, p2, p3) -> dict[str, np.float64]:
-    delta_l1_t = -p1 * np.sqrt(2 * g * l1_t) + p3 * u_t
-    l1_t = max([0, l1_t + delta_l1_t]) # TODO: revisar qual valor de l1_t deve entrar na formula delta_l2_t
-    delta_l2_t = p1 * np.sqrt(2 * g * l1_t) - p2 * np.sqrt(2 * g * l2_t)
-    return {"x1": l1_t, "x2": max([0, l2_t + delta_l2_t])}
+from simulation_models.cascaded_water_tanks import simulation_model as double_tank_simultaion
+from simulation_models.ph_residual_water_treatment import simulation_model as ph_simulation
 
 
 def create_environment() -> SetPointEnv:
@@ -37,30 +30,32 @@ def create_environment() -> SetPointEnv:
         "p3": ("uniform", {"low": 0.07, "high": 0.17})       # p3
     }
     seed = 42
-    params_ensemble = Ensemble(1, distribtions, seed)
+    params_ensemble = Ensemble(10, distribtions, seed)
 
     env = gymnasium.make("SetPointEnv-V0", 
                    scheduller       = scheduller, 
-                   params_ensemble  = params_ensemble, 
-                   simulation_model = simulation_model,
+                   simulation_model = double_tank_simultaion,
+                   ensemble_params  = params_ensemble.get_param_set(), 
+                   termination_rule = TerminationRule.INTERVALS,
+                   error_formula    = ErrorFormula.DIFFERENCE,
                    start_points     = [20, 20],
-                   tracked_point    = NamedPoint.X2
+                   tracked_point    = 'x2',
                    )
+    env = DictToArrayWrapper(env)
     
     scheduller = Scheduller(set_points, intervals) 
     return env, scheduller, params_ensemble
 
 
 
-
 env, scheduller, params_ensemble = create_environment()
 
-pime_ppo_controller = PIME_PPO(env, scheduller, 
-                               tracked_point_name = NamedPoint.X2)
+pime_ppo_controller = PIME_PPO(env, scheduller, params_ensemble, 
+                               tracked_point_name = 'x2')
 
-pime_ppo_controller.guide_with_pid(n_episodes=10)
-
+pime_ppo_controller.train(n_episodes = 10)
 """
+pime_ppo_controller.guide_with_pid(n_episodes=10)
 
 # Após a orientação inicial, continue o treinamento normal do PPO
 ppo_controller.learn(total_timesteps=100)
