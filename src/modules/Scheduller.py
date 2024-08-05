@@ -11,20 +11,23 @@ class Scheduller:
             ) -> None:
         assert len(set_points) == len(intervals), "set_points and intervals must have save lenght"
 
+        # Example:
+        # intervals = [500, 100, 200]
+        # cumulative_intervals = [500, 600, 800]
+
         self.set_points = set_points
         self.intervals = intervals
-        self.cumulative_intervals: NDArray = np_cumsum(self.intervals)
+        self.cumulative_intervals: NDArray = np_cumsum(self.intervals) 
         self.intervals_sum = sum(self.intervals)
         
     def get_set_point_at(self, *, step: int) -> float:
         assert step >= 0, "Step must not be negative"
 
-        cumulative_intervals = np_cumsum(self.intervals)
-
-        max_step = cumulative_intervals[-1]
+        # TODO: Encontrar uma forma mais eficiente de pegar o set point
+        max_step = self.cumulative_intervals[-1]
         if step >= max_step:
             return self.set_points[-1]
         
-        for i, cum_interval in enumerate(cumulative_intervals): # [500, 100, 200]
+        for i, cum_interval in enumerate(self.cumulative_intervals): 
             if step < cum_interval: 
                 return self.set_points[i]

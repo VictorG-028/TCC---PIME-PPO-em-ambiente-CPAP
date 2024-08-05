@@ -405,7 +405,7 @@ class Ensemble:
         return param_set
     
 
-    def get_all_params_set(self) -> list[dict[float]]:
+    def get_all_samples(self) -> list[dict[float]]:
         all_params_set = []
         for i in range(self.size):
             param_set = {}
