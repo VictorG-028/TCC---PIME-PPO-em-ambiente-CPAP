@@ -211,7 +211,7 @@ class PIME_PPO:
                  gae_lambda: float = 0.97,                                  # PPO param
                  c1: float = 1.0,                                           # not used
                  c2: float = 0.02,                                          # PPO param
-                 integrator_bounds: list[int, int] = [-25, 25],             # Clip para pid (formula do integrator) # TODO ver como usar isso no PID
+                 integrator_bounds: list[int, int] = [-25, 25],             # Clip para pid (formula do integrator)
                  sample_period: int = 1                                     # Euler method sampling period (dt)
                  ) -> None:
         
@@ -256,8 +256,9 @@ class PIME_PPO:
                        gae_lambda            = gae_lambda,           # Factor for trade-off of bias vs variance for Generalized Advantage Estimator. Equivalent to classic advantage when set to 1.
                        gamma                 = 0.99,                 # Discount factor
                        rollout_buffer_class  = RolloutBuffer,        #
+                    #    rollout_buffer_kwargs = {'buffer_size': buffer_size},
                     #    buffer_size           = buffer_size,
-                       n_steps               = buffer_size
+                       n_steps               = steps_per_episode * ensemble.size * episodes_per_sample # TODO: descobrir por que remover shceduller.intervals_sum calcula corretamente o n_envs (lembrar: n_envs = buffer size, uma vez que num_envs = 1)
                        )
         
         # Setup logger (mandatory to avoid "AttributeError: 'PPO' object has no attribute '_logger'.")
@@ -305,9 +306,6 @@ class PIME_PPO:
                         # print(f"[PIME_PPO.py] {is_start_episode=} {type(is_start_episode)}")
 
                         action = pi_action + ppo_action.item()
-
-                        # TODO: Revisar esse clip e descobrir porque o GPT fez essa sugestão.
-                        # action = np.clip(int(action), 0, env.action_space.n - 1)
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         steps_in_episode += 1
