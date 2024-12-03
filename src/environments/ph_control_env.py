@@ -53,7 +53,7 @@ class PhControl(BaseSetPointEnv):
 
         # Definindo o espaço de ações (u_t)
         self.action_space = spaces.Box(
-            low=-1_000, # TODO/Perguntar: validar low e high
+            low=-1_000,
             high=1_000, 
             shape=(1,),
             dtype=np.float64
@@ -62,7 +62,7 @@ class PhControl(BaseSetPointEnv):
         # Definindo o espaço de observações (ph_t e conc_t)
         self.observation_space = spaces.Dict({
             "x1": spaces.Box(low=0, high=14, shape=(1,), dtype=np.float64), # ph
-            "x2": spaces.Box(low=0, high=1000, shape=(1,), dtype=np.float64), # conc # TODO/Perguntar: validar min e max da concentração
+            "x2": spaces.Box(low=0, high=1000, shape=(1,), dtype=np.float64), # conc
             "y_ref": spaces.Box(low=0, high=14, shape=(1,), dtype=np.float64),
             "z_t": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float64)
         })

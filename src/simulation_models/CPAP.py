@@ -82,10 +82,7 @@ def simulation_model(
             last_pressuse = p[i]
     
     i += 1
-    # Pergunta: o vetor x contem o fluxo, volume e pressão ?
-    # Pergunta: Tem algo que poderia ser adicionado ou removido desse vetor x ?
-    # Pergunta: Seria uma boa ideia colocar phase (fase: int em vez de str) no vetor x ?
-    # Pergunta: Pode usar last_pressure no lugar de p[i-1] no retorno ?
+
     return {
         "x1": f[i-1], 
         "x2": v[i-1],

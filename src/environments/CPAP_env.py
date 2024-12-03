@@ -120,10 +120,6 @@ class CpapEnv(BaseSetPointEnv):
         self.f = np.zeros(len(self.t))  # Flow [l / min]
         self.v = np.zeros(len(self.t))  # Volume [ml]
 
-        # Perguntas sobre initial state
-        # Pergunta: onde driving_pressure é usado na simulação ?
-        # Pergunta: onde drive last_pressure é usado na simulação ?
-
         # [Simulation.simulate] Initial state
         self.phase = 'exhale'
         self.last_pressuse = ensemble_params['peep'] # TODO: fazer esse valor mudar ao trocar o ensemble. provavelmente mudar o reset do BaseEnv

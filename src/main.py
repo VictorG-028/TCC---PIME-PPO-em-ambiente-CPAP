@@ -25,7 +25,7 @@ from scipy.optimize import minimize
 
 ################################################################################
 
-def get_trained_pid_controller(
+def train_pid_controller(
                                 plant: ct.TransferFunction, 
                                 pid_training_method: str = 'BFGS', 
                                 initial_kp = 0, 
@@ -170,7 +170,7 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     den = [float(coef.evalf()) for coef in sp.Poly(den, s).all_coeffs()]
     water_tank_model = ct.TransferFunction(num, den)
 
-    trained_pid, pid_optimized_params = get_trained_pid_controller(
+    trained_pid, pid_optimized_params = train_pid_controller(
         plant=water_tank_model, 
         pid_training_method='BFGS', 
         initial_kp=0, 
@@ -266,7 +266,7 @@ def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     den = [float(coef.evalf()) for coef in sp.Poly(den, s).all_coeffs()]
     water_tank_model = ct.TransferFunction(num, den)
 
-    trained_pid, pid_optimized_params = get_trained_pid_controller(
+    trained_pid, pid_optimized_params = train_pid_controller(
         plant=ph_control_model, 
         pid_training_method='BFGS', 
         initial_kp=0, 
@@ -346,7 +346,7 @@ def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemble, Ca
     intervals = [500, 500, 500]
     scheduller = Scheduller(set_points, intervals)
 
-    # TODO encontrar distribuições diferentes de constant para esses parâmetros
+    # TODO encontrar distribuições diferentes de "constant" para esses parâmetros
     distributions = {
         # Pacient
         "rp": ("constant", {"constant": _rp}),
@@ -418,7 +418,7 @@ def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemble, Ca
     cpap_model = ct.TransferFunction(filled_numerators, filled_denominators)
 
     # Train the PID controller
-    trained_pid, pid_optimized_params = get_trained_pid_controller(cpap_model, pid_training_method='BFGS') # TODO input de pid_training_method usando interface gráfica
+    trained_pid, pid_optimized_params = train_pid_controller(cpap_model, pid_training_method='BFGS')
 
     return env, scheduller, ensemble, trained_pid, pid_optimized_params
 
@@ -458,4 +458,4 @@ pime_ppo_controller = PIME_PPO(
                             logs_folder_path=logs_folder_path,
                             )
 
-pime_ppo_controller.train(iterations = 1)
+pime_ppo_controller.train(iterations = 10)

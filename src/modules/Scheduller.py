@@ -1,5 +1,5 @@
 from typing import List
-from numpy import cumsum as np_cumsum
+from numpy import cumsum as np_cumsum, searchsorted as np_searchsorted
 from numpy.typing import NDArray
 
 class Scheduller:
@@ -23,7 +23,7 @@ class Scheduller:
     def get_set_point_at(self, *, step: int) -> float:
         assert step >= 0, "Step must not be negative"
 
-        # TODO: Encontrar uma forma mais eficiente de pegar o set point
+        
         max_step = self.cumulative_intervals[-1]
         if step >= max_step:
             return self.set_points[-1]
@@ -31,3 +31,6 @@ class Scheduller:
         for i, cum_interval in enumerate(self.cumulative_intervals): 
             if step < cum_interval: 
                 return self.set_points[i]
+        
+        # index = np_searchsorted(self.cumulative_intervals, step, side='right')
+        # return self.set_points[index]
