@@ -200,8 +200,8 @@ class PIME_PPO:
                  scheduller: Scheduller,                                    # manage the set_point at each step
                  ensemble: Ensemble,                                        # manage the random inicialization of parameters
                  pid_controller: Optional[Callable[[float], float]] = None, # Tuned pid encapsulated inside a function
-                 optimized_Kp: np.float64 = 0,                              # 
-                 optimized_Ki: np.float64 = 0,                              # 
+                 optimized_Kp: np.float64 = 1,                              # 
+                 optimized_Ki: np.float64 = 1,                              # 
                  optimized_Kd: np.float64 = 0,                              # Kd is not used in PIME PPO
                  tracked_point_name: str = 'x1',                            # string like "x[integer]"
                  verbose: int = 1,                                          # 
