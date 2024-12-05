@@ -442,7 +442,7 @@ experiments = {
     },
 }
 
-create_env_function, logs_folder_path, tracked_point = experiments['CPAP'].values()
+create_env_function, logs_folder_path, tracked_point = experiments['double_water_tank'].values()
 env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_function()
 
 # y = trained_pid(44.358696)
@@ -458,4 +458,4 @@ pime_ppo_controller = PIME_PPO(
                             logs_folder_path=logs_folder_path,
                             )
 
-pime_ppo_controller.train(iterations = 10)
+pime_ppo_controller.train(steps_to_run = 10_000)

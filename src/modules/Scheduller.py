@@ -21,6 +21,19 @@ class Scheduller:
         self.intervals_sum = sum(self.intervals)
         
     def get_set_point_at(self, *, step: int) -> float:
+        """
+        Returns the set point value for the given step.
+
+        Args:
+            step (int): Current step.
+
+        Returns:
+            float: The corresponding set point value.
+
+        Raises:
+            AssertionError: If step is negative.
+        """
+
         assert step >= 0, "Step must not be negative"
 
         
@@ -32,5 +45,6 @@ class Scheduller:
             if step < cum_interval: 
                 return self.set_points[i]
         
+        # More efficient version for looong self.cumulative_intervals np array
         # index = np_searchsorted(self.cumulative_intervals, step, side='right')
         # return self.set_points[index]

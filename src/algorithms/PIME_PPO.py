@@ -1,4 +1,5 @@
 from typing import Callable, Optional
+import math
 import os
 import gymnasium
 import numpy as np
@@ -224,7 +225,7 @@ class PIME_PPO:
             self.pid_controller = PIDController(optimized_Kp, optimized_Ki, optimized_Kd, integrator_bounds, sample_period, env.unwrapped.error_formula) 
 
         self.env = env
-        self.sheduller = scheduller
+        self.scheduller = scheduller
         self.ensemble = ensemble
         self.tracked_point_name = tracked_point_name
         self.episodes_per_sample = episodes_per_sample
@@ -239,13 +240,13 @@ class PIME_PPO:
 
         # TODO: esse if engessa o código da classe TerminationRule, é preciso encotrar uma outra forma de obter steps_per_episode (talvez colocar o input direto no __init__, mas isso permite o step do BaseEnv calcular self.done de forma que gere o erro de falta de memória no buffer ou gere uma situação sem erros, mas que usa mais emmória no buffer do que o necessário. Colocar steps_per_episode como input no __init__ do PIME_PPO.py também deixa o código difícil de usar e o ideal eh não criar dificuldade)
         if env.unwrapped.max_step is not None:
-            steps_per_episode = env.unwrapped.max_step
+            self.steps_per_episode = env.unwrapped.max_step
         else:
-            steps_per_episode = env.unwrapped.scheduller.intervals_sum
+            self.steps_per_episode = env.unwrapped.scheduller.intervals_sum
 
         if buffer_size is None:
-            buffer_size = steps_per_episode * ensemble.size * \
-                          scheduller.intervals_sum * episodes_per_sample
+            buffer_size = self.steps_per_episode * ensemble.size * episodes_per_sample # * self.scheduller.intervals_sum 
+                          
         self.buffer_size = buffer_size
             
         print(f"{buffer_size=}")
@@ -256,9 +257,10 @@ class PIME_PPO:
                        gae_lambda            = gae_lambda,           # Factor for trade-off of bias vs variance for Generalized Advantage Estimator. Equivalent to classic advantage when set to 1.
                        gamma                 = 0.99,                 # Discount factor
                        rollout_buffer_class  = RolloutBuffer,        #
+                       # Definir o buffer_size usando rollout_buffer_kwargs ou buffer_size não funciona. Olhando o código fonte, precisa definir n_steps que é "the number of experiences which is collected from a single environment under the current policy before its next update"
                     #    rollout_buffer_kwargs = {'buffer_size': buffer_size},
                     #    buffer_size           = buffer_size,
-                       n_steps               = steps_per_episode * ensemble.size * episodes_per_sample # TODO: descobrir por que remover shceduller.intervals_sum calcula corretamente o n_envs (lembrar: n_envs = buffer size, uma vez que num_envs = 1)
+                       n_steps               = self.buffer_size # TODO: descobrir por que remover shceduller.intervals_sum calcula corretamente o n_envs (lembrar: n_envs = buffer size, uma vez que num_envs = 1)
                        )
         
         # Setup logger (mandatory to avoid "AttributeError: 'PPO' object has no attribute '_logger'.")
@@ -272,13 +274,20 @@ class PIME_PPO:
         # TODO: usar REGEX na string tracked_point_name para validar que é "x[:number:]"
 
 
-    def train(self, iterations = 10) -> None:
+    def train(self, steps_to_run = 100_000) -> None:
         """
-        iteration [int]: Ammount of times to loop through all models in ensemble. Each complete ensemble loop is 1 iteration.
+        steps_to_run [int]: Approximattely the ammount of calls to env.step function. The ammount of calls cannot be less than steps_to_run, but can be more if nedded to finish an iteration. Iteration is the ammount of times to loop through all models in ensemble. Each complete ensemble loop is 1 iteration.
         """
+
+        assert steps_to_run > 0, "steps_to_run must be greater than 0."
+        
         # steps_extra_info: list[tuple] = []
         steps_in_episode = 0
-        counter = 0
+        total_steps_counter = 0
+
+        steps_per_iteration = self.steps_per_episode * self.ensemble.size * self.episodes_per_sample
+        iterations: int = math.ceil(steps_to_run / steps_per_iteration)
+        print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
         for iteration in range(1, iterations+1):
 
@@ -288,22 +297,12 @@ class PIME_PPO:
                 for j in range(self.episodes_per_sample):
                     obs, truncated = self.env.reset()
                     is_start_episode = True # Is true only before the first step/action is taken
-                    done = False
+                    done = False # done is updated by termination rule
                     while not done:
-                        # flattened_obs = flatten_observation(obs)
-                        # flattened_obs = np.array([obs[key] for key in obs.keys()])
-                        # flattened_obs = flattened_obs.reshape((1, -1))  # Garantir formato bidimensional
-                        # assert isinstance(flattened_obs, np.ndarray), "flattened_obs must be a np.ndarray"
-                        # print(f"[PIME_PPO.py] {obs=} {type(obs)=} {obs.shape=}")
-                        # print(f"[PIME_PPO.py] {self.tracked_point_name=}")
-                        # input(">>>")
-                        # print(f"[PIME_PPO.py] {self.env.unwrapped.reward=}")
+
                         pi_action = self.pid_controller(self.env.unwrapped.reward)
 
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
-                        # print(f"[PIME_PPO.py] {ppo_action=}")
-                        # print(f"[PIME_PPO.py] {next_hidden_state=}")
-                        # print(f"[PIME_PPO.py] {is_start_episode=} {type(is_start_episode)}")
 
                         action = pi_action + ppo_action.item()
 
@@ -319,13 +318,13 @@ class PIME_PPO:
                             log_prob = policy_generated_distribution.log_prob(action_tensor)
 
 
-                        counter += 1
+                        total_steps_counter += 1
                         self.ppo.rollout_buffer.add(obs, action, reward, is_start_episode, value, log_prob)
                         
-                        obs = next_obs # Can update obs after storing both in buffer
+                        obs = next_obs # Can update obs after storing in buffer
                         is_start_episode = False
 
-                    #Post episode run
+                    # Post episode run
                     print(f"{steps_in_episode=}")
                     steps_in_episode = 0
 
@@ -334,5 +333,7 @@ class PIME_PPO:
             self.ppo.logger.record("train/iteration", iteration)
             self.ppo.logger.dump(iteration)
         
+        counter_divided_by_iterations = total_steps_counter/iterations
+        is_same_as_buffer_size = counter_divided_by_iterations == self.buffer_size
         print(f"{self.buffer_size=}")
-        print(f"{counter=}")
+        print(f"{total_steps_counter=} divided by {iterations=} is equal to {counter_divided_by_iterations} ({is_same_as_buffer_size=})")
