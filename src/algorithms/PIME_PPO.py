@@ -16,7 +16,7 @@ import torch.nn as nn
 
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
-from modules.Ensemble import Ensemble
+from modules.EnsembleGenerator import EnsembleGenerator
 from modules.Scheduller import Scheduller
 
 Y_REF = 2
@@ -124,7 +124,6 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
             self.action_space.shape[0]
         )
 
-
 class PIDController:
     """
     k = pi controller
@@ -199,7 +198,8 @@ class PIME_PPO:
     def __init__(self, 
                  env: gymnasium.Env,                                        # gymnasium.Env like set point env
                  scheduller: Scheduller,                                    # manage the set_point at each step
-                 ensemble: Ensemble,                                        # manage the random inicialization of parameters
+                 ensemble_generator: EnsembleGenerator,                              # manage the random inicialization of parameters
+                 ensemble_size: int = 2,                                    # number of models in ensemble
                  pid_controller: Optional[Callable[[float], float]] = None, # Tuned pid encapsulated inside a function
                  optimized_Kp: np.float64 = 1,                              # 
                  optimized_Ki: np.float64 = 1,                              # 
@@ -207,7 +207,7 @@ class PIME_PPO:
                  tracked_point_name: str = 'x1',                            # string like "x[integer]"
                  verbose: int = 1,                                          # 
                  logs_folder_path: str = "logs/ppo/",                       # PPO logs
-                 buffer_size: Optional[int] = None,                         # buffer_size = ensemble.size * episode_lenght (minimum size needed to not get buffer overflow error) # TODO: perceber q largura do episódio depende de teremination rule e dar um jeito de descobrir quanto vai durar
+                 buffer_size: Optional[int] = None,                         # buffer_size = ensemble_size * episode_lenght (minimum size needed to not get buffer overflow error) # TODO: perceber q largura do episódio depende de teremination rule e dar um jeito de descobrir quanto vai durar
                  episodes_per_sample: int = 5,                              # Number of episodes collected for one parameter set
                  gae_lambda: float = 0.97,                                  # PPO param
                  c1: float = 1.0,                                           # not used
@@ -226,7 +226,8 @@ class PIME_PPO:
 
         self.env = env
         self.scheduller = scheduller
-        self.ensemble = ensemble
+        self.ensemble = ensemble_generator
+        self.ensemble_size = ensemble_size
         self.tracked_point_name = tracked_point_name
         self.episodes_per_sample = episodes_per_sample
         self.sample_period = sample_period
@@ -245,7 +246,7 @@ class PIME_PPO:
             self.steps_per_episode = env.unwrapped.scheduller.intervals_sum
 
         if buffer_size is None:
-            buffer_size = self.steps_per_episode * ensemble.size * episodes_per_sample # * self.scheduller.intervals_sum 
+            buffer_size = self.steps_per_episode * ensemble_size * episodes_per_sample # * self.scheduller.intervals_sum 
                           
         self.buffer_size = buffer_size
             
@@ -253,7 +254,8 @@ class PIME_PPO:
         self.ppo = PPO(CustomActorCriticPolicy, 
                        env, 
                        verbose               = verbose,              #
-                       vf_coef               = c2,                   #
+                       ent_coef              = c2,                   # 1.0
+                       vf_coef               = c1,                   # 0.02
                        gae_lambda            = gae_lambda,           # Factor for trade-off of bias vs variance for Generalized Advantage Estimator. Equivalent to classic advantage when set to 1.
                        gamma                 = 0.99,                 # Discount factor
                        rollout_buffer_class  = RolloutBuffer,        #
@@ -285,17 +287,17 @@ class PIME_PPO:
         steps_in_episode = 0
         total_steps_counter = 0
 
-        steps_per_iteration = self.steps_per_episode * self.ensemble.size * self.episodes_per_sample
+        steps_per_iteration = self.steps_per_episode * self.ensemble_size * self.episodes_per_sample
         iterations: int = math.ceil(steps_to_run / steps_per_iteration)
         print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
         for iteration in range(1, iterations+1):
 
-            for sample_parameters in self.ensemble.get_all_samples():
-                self.env.unwrapped.set_enviroment_params(sample_parameters)
+            for m in range(self.ensemble_size):
                 
                 for j in range(self.episodes_per_sample):
-                    obs, truncated = self.env.reset()
+                    sample_parameters = self.ensemble.generate_sample()
+                    obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
                     is_start_episode = True # Is true only before the first step/action is taken
                     done = False # done is updated by termination rule
                     while not done:

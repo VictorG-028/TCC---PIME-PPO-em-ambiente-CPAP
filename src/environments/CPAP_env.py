@@ -3,7 +3,7 @@ from typing import Callable, Dict, Literal, Optional
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
-from modules.Ensemble import Ensemble
+from modules.EnsembleGenerator import EnsembleGenerator
 
 import numpy as np
 import gymnasium

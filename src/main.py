@@ -1,4 +1,5 @@
-from typing import Callable
+from typing import Callable, Optional
+from algorithms.PID_Controller import PIDController
 from algorithms.PIME_PPO import PIME_PPO
 # from CustomEnv.WaterTankEnv import WaterTankENv
 # from CustomEnv.PHEnv import PHENv
@@ -6,14 +7,14 @@ from wrappers.DictToArray import DictToArrayWrapper
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
 
-from modules.Ensemble import Ensemble
+from modules.EnsembleGenerator import EnsembleGenerator
 from modules.Scheduller import Scheduller
 
 from environments import BaseSetPointEnv
 
 import gymnasium
 import numpy as np
-from stable_baselines3 import PPO
+import matplotlib.pyplot as plt
 
 from simulation_models.cascaded_water_tanks import simulation_model as double_tank_simultaion
 from simulation_models.ph_control import simulation_model as ph_simulation
@@ -26,17 +27,17 @@ from scipy.optimize import minimize
 ################################################################################
 
 def train_pid_controller(
-                                plant: ct.TransferFunction, 
-                                pid_training_method: str = 'BFGS', 
-                                initial_kp = 0, 
-                                initial_ki = 0, 
-                                initial_kd = 0
-                            ) -> Callable[[float], float]:
+                        plant: ct.TransferFunction, 
+                        pid_training_method: str = 'BFGS', 
+                        initial_kp = 0, 
+                        initial_ki = 0, 
+                        initial_kd = 0
+                    ) -> Callable[[float], float]:
         """
         Train a PID controller for a given plant using a specified optimization method.
 
         Parameters:
-        plant (Callable[[np.ndarray], np.ndarray]): The plant to be controlled.
+        plant (Callable[[np.ndarray], np.ndarray]): The plant to be controlled. ZN method doesn't need a plant.
         pid_training_method (str): The optimization method to use for training the PID controller.
 
         Returns:
@@ -88,7 +89,7 @@ def train_pid_controller(
 
 ################################################################################
 
-def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemble, Callable]:
+def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
 
     """ Variable Glossary
 
@@ -96,7 +97,6 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
         Variável complexa de Laplace. 
         Usada para representar a frequência em análises de sistemas no domínio de Laplace.
 
-    # 
     g
         Unidade de medida: [cm/s²] # TODO confirmar unidade de medida
         Gravity. Gravidade.
@@ -118,19 +118,18 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
         "p3": ("uniform", {"low": 0.07, "high": 0.17})       # p3
     }
     seed = 42
-    ammount_of_parameter_sets = 2
-    ensemble = Ensemble(ammount_of_parameter_sets, distributions, seed)
+    ensemble = EnsembleGenerator(distributions, seed)
 
     env = gymnasium.make("CascadeWaterTankEnv-V0", 
                     scheduller             = scheduller, 
                     simulation_model       = double_tank_simultaion,
-                    ensemble_params        = ensemble.get_param_set(), 
+                    ensemble_params        = ensemble.generate_sample(), 
                     action_size            = 1,
                     x_size                 = 2,
                     x_start_points         = None,#  [20, 20],
                     tracked_point          = 'x2',
                     termination_rule       = TerminationRule.INTERVALS,
-                    error_formula          = ErrorFormula.DIFFERENCE,
+                    error_formula          = ErrorFormula.DIFFERENCE
                     )
     env = DictToArrayWrapper(env)
     
@@ -163,7 +162,7 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     water_tank_model = sp.simplify(l2_s_solution)
 
     # Injeta parâmetros e converte para ct.transferFunction
-    parameters_values = ensemble.get_all_samples()[0]
+    parameters_values = ensemble.generate_sample()
     water_tank_model = water_tank_model.subs(parameters_values)
     num, den = sp.fraction(water_tank_model)
     num = [float(coef.evalf()) for coef in sp.Poly(num, s).all_coeffs()]
@@ -181,7 +180,7 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     return env, scheduller, ensemble, trained_pid, pid_optimized_params
 
 
-def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemble, Callable]:
+def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
 
     """ Variable Glossary
 
@@ -222,13 +221,12 @@ def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
         "p2": ("uniform", {"low": 0.0015, "high": 0.0025}),
     }
     seed = 42
-    ammount_of_parameter_sets = 10
-    ensemble = Ensemble(ammount_of_parameter_sets, distributions, seed)
+    ensemble = EnsembleGenerator(distributions, seed)
 
     env = gymnasium.make("PhResidualWaterTreatmentEnv-V0", 
                     scheduller             = scheduller, 
                     simulation_model       = ph_simulation,
-                    ensemble_params        = ensemble.get_param_set(), 
+                    ensemble_params        = ensemble.generate_sample(), 
                     action_size            = 1,
                     x_size                 = 2,
                     x_start_points         = None,
@@ -277,7 +275,7 @@ def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     return env, scheduller, ensemble, trained_pid, pid_optimized_params
 
 
-def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemble, Callable]:
+def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
 
     """ Variable Glossary
 
@@ -374,13 +372,12 @@ def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemble, Ca
         # "_f_i": ("constant", {"constant": 350 / 1}),
     }
     seed = 42
-    ammount_of_parameter_sets = 2
-    ensemble = Ensemble(ammount_of_parameter_sets, distributions, seed)
+    ensemble = EnsembleGenerator(distributions, seed)
     
     env = gymnasium.make("CpapEnv-V0", 
                     scheduller             = scheduller, 
                     simulation_model       = cpap_simulation,
-                    ensemble_params        = ensemble.get_param_set(), 
+                    ensemble_params        = ensemble.generate_sample(),
                     x_size                 = 3,
                     x_start_points         = None,
                     tracked_point          = 'x3',
@@ -442,7 +439,7 @@ experiments = {
     },
 }
 
-create_env_function, logs_folder_path, tracked_point = experiments['double_water_tank'].values()
+create_env_function, logs_folder_path, tracked_point = experiments['CPAP'].values()
 env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_function()
 
 # y = trained_pid(44.358696)
@@ -458,4 +455,4 @@ pime_ppo_controller = PIME_PPO(
                             logs_folder_path=logs_folder_path,
                             )
 
-pime_ppo_controller.train(steps_to_run = 10_000)
+pime_ppo_controller.train(steps_to_run = 100)

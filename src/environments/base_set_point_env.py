@@ -1,9 +1,9 @@
 # from __future__ import annotations
-from typing import Callable, Dict, Literal, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
-from modules.Ensemble import Ensemble
+from modules.EnsembleGenerator import EnsembleGenerator
 
 import numpy as np
 import gymnasium
@@ -140,11 +140,11 @@ class BaseSetPointEnv(gymnasium.Env):
             )
 
 
-    def set_enviroment_params(self, sample_params: dict[str, np.float64]) -> None:
+    def set_ensemble_params(self, sample_params: dict[str, np.float64]) -> None:
         self.ensemble_params = sample_params
 
 
-    def generate_random_x_vector_randomly(self) -> dict[str, np.float64]:
+    def generate_x_vector_randomly(self) -> dict[str, np.float64]:
         random_sample = self.observation_space.sample()
 
         # Remove os dois últimos valores (y_ref e z_t)
@@ -160,8 +160,10 @@ class BaseSetPointEnv(gymnasium.Env):
         return random_x_vector
 
 
-    def reset(self, seed: Optional[int] = None, options = None):
+    def reset(self, seed: Optional[int] = None, options = None) -> tuple[dict[str, Any], dict]:
         super().reset(seed=seed)
+
+        self.set_ensemble_params(options["ensemble_sample_parameters"])
 
         self.setpoint = self.scheduller.get_set_point_at(step=0)
         self.cummulative_error = 0
@@ -172,7 +174,7 @@ class BaseSetPointEnv(gymnasium.Env):
                 f"x{i+1}": value for i, value in enumerate(self.x_start_points)
             }
         else:
-            x_values = self.generate_random_x_vector_randomly() 
+            x_values = self. generate_x_vector_randomly() 
 
         self.observation = {
             **x_values,
