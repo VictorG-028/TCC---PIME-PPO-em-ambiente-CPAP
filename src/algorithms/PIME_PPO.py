@@ -14,6 +14,7 @@ import torch as pyTorch
 import torch.nn.functional as torch_nn_functional
 import torch.nn as nn
 
+from algorithms.PID_Controller import PIDController
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
 from modules.EnsembleGenerator import EnsembleGenerator
@@ -124,63 +125,7 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
             self.action_space.shape[0]
         )
 
-class PIDController:
-    """
-    k = pi controller
-    y_t = current y value
-    error = error_formula(y, y_ref) # Ex.: (y_ref - y); -(y_ref - y)²
-    z_0 = 0
-    z_t = z_(t-1) + error
-    k(y_t, y_ref) = -Kp * error +Ki * z_t
-    
-    [en]
-    PID controller for a discrete-time state space model (this means that dt = 1).
-    Consider that env.step() takes roughly the same time and env uses a discrete-time model.
-    This pid controller is meant to recive optimized kp, ki and kd.
-    
-    [pt-br]
-    Controlador PID para um modelo de espaço de estados de tempo discreto (isso significa que dt = 1).
-    dt = 1 por que env.step() demora + ou - o mesmo tempo e o env usa um modelo de tempo discreto.
-    Este controlador pid espera receber kp, ki e kd otimizados.
-    """
-    def __init__(
-            self, 
-            Kp, Ki, Kd, 
-            integrator_bounds: list[int, int],
-            dt = 1,
-            error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE, 
-            use_derivative: bool = False
-            ):
-        self.Kp = Kp
-        self.Ki = Ki
-        self.Kd = Kd
-        self.min = integrator_bounds[0]
-        self.max = integrator_bounds[1]
-        self.dt = dt
-        self.error_formula = error_formula
-        self.previous_error = 0
-        self.integral = 0
 
-        # Pergunta: Porque os exeprimentos do tanque de água e controle de ph usam dt = 2 e dt = 20 ? 
-        # Pergunta: Qual é o dt usado no CPAP ?
-        # Pergunta: Porque dt é usado na formula do PID ?
-        # Pergunta: O que é discretização do método de Euler ?
-
-        def PID_formula(error):
-            derivative = (error - self.previous_error) / self.dt
-            self.Kp * error + self.Ki * self.integral + self.Kd * derivative
-
-        def PI_formula(error):
-            return self.Kp * error + self.Ki * self.integral
-        
-        self.formula = PID_formula if use_derivative else PI_formula
-
-    def __call__(self, error: float) -> float:
-        self.integral += np.clip(error * self.dt, self.min, self.max)
-        output = self.formula(error)
-        self.previous_error = error
-
-        return output
 
 
 

@@ -1,8 +1,6 @@
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 from algorithms.PID_Controller import PIDController
 from algorithms.PIME_PPO import PIME_PPO
-# from CustomEnv.WaterTankEnv import WaterTankENv
-# from CustomEnv.PHEnv import PHENv
 from wrappers.DictToArray import DictToArrayWrapper
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
@@ -16,19 +14,94 @@ import gymnasium
 import numpy as np
 import matplotlib.pyplot as plt
 
-from simulation_models.cascaded_water_tanks import simulation_model as double_tank_simultaion
-from simulation_models.ph_control import simulation_model as ph_simulation
-from simulation_models.CPAP import simulation_model as cpap_simulation
-
 import sympy as sp
 import control as ct
 from scipy.optimize import minimize
 
 ################################################################################
 
+def train_pid_with_ZN_method(plant: ct.TransferFunction, 
+                             pid_type: Literal["P", "PI", "PID"] = "PI",
+                             plot: bool = False,
+                             ) -> tuple[float, float, float]:
+    t, y = ct.step_response(plant)
+    info = ct.step_info(plant)
+
+    # Calculando primeira derivada (dy/dt) e segunda derivada (d²y/dt²)
+    dy_dt = np.gradient(y, t)
+    d2y_dt2 = np.gradient(dy_dt, t)
+
+    # Encontrando o ponto de inflexão (mudança de sinal na segunda derivada)
+    inflexion_idx = np.where(np.diff(np.sign(d2y_dt2)))[0][0]
+    t_inflexion = t[inflexion_idx] # x
+    y_inflexion = y[inflexion_idx] # y
+    slope = dy_dt[inflexion_idx]   # Derivada no ponto
+
+    # Definindo a reta tangente
+    # def tangente(t: float) -> float:
+    #     """tangente(t) = f(t) = y = f'(t_0) ⋅ (t - t_0) + f(t_0)
+    #     - t_0 e y_inflexion=f(t_0) são o tempo e valor no ponto de inflexão.
+    #     - f'(t_0) é o valor da derivada no ponto de inflexão (dy/dt)
+    #     """
+    #     return slope * (t - t_inflexion) + y_inflexion
+    
+    # t_tangent = np.linspace(t[0], t[-1], 1000)
+    # y_tangent = tangente(t_tangent)
+
+    # Interseção com y=0
+    t_intersect_y0 = t_inflexion - y_inflexion / slope
+
+    # Interseção com y=h (escolha o valor de h)
+    h = info["Peak"]  # Valor mais alto
+    t_intersect_yh = t_inflexion + (h - y_inflexion) / slope
+
+    L = t_intersect_y0 
+    T = t_intersect_yh - t_intersect_y0
+
+    if (pid_type == "P"):
+        kp = T / L
+        ki = 0
+        kd = 0
+    elif (pid_type == "PI"):
+        kp = 0.9 * (T / L)
+        ki = L / 0.3
+        kd = 0
+    elif (pid_type == "PID"):
+        kp = 1.2 * (T / L)
+        ki = 2 * L
+        kd = 0.5 * L
+    else:
+        raise ValueError("Invalid PID type. Choose between 'P', 'PI' or 'PID'.")
+
+    if (plot):
+        plt.plot(t, y)
+        plt.title("Resposta ao Degrau")
+        plt.xlabel("Tempo (s)")
+        plt.ylabel("Saída")
+        plt.grid()
+        plt.show()
+
+    # Other ZN method (unused)
+    # kp = 100000
+    
+    # untuned_pid = ct.TransferFunction([kp], [1])
+    # closed_loop = ct.feedback(untuned_pid * water_tank_model)
+    # t, y = ct.impulse_response(closed_loop)
+
+    # # Plot da resposta ao degrau
+    # plt.plot(t, y)
+    # plt.title(f"Resposta ao Inpulso {kp=}")
+    # plt.xlabel("Tempo (s)")
+    # plt.ylabel("Saída")
+    # plt.grid()
+    # plt.show()
+
+    return kp, ki, kd
+
+
 def train_pid_controller(
                         plant: ct.TransferFunction, 
-                        pid_training_method: str = 'BFGS', 
+                        pid_training_method: str | Literal["ZN"] = 'BFGS', 
                         initial_kp = 0, 
                         initial_ki = 0, 
                         initial_kd = 0
@@ -44,25 +117,28 @@ def train_pid_controller(
         function: A function that takes an input array and returns the control signal from the trained PID controller.
         """
 
-        def optimize_pid(params):
-            Kp, Ki, Kd = params
-            pid = ct.TransferFunction([Kd, Kp, Ki], [1, 0.001, 0.001])
-            closed_loop = ct.feedback(pid * plant, 1)
-            t, y = ct.step_response(closed_loop, T=np.linspace(0, 10, 1000))
-            # Objective: minimize the integral of the absolute error
-            error = 1 - y  # assuming unit step input
-            return np.sum(np.abs(error))
+        if (pid_training_method == "ZN"):
+            optimized_Kp, optimized_Ki, optimized_Kd = train_pid_with_ZN_method(plant)
+        else:
+            def optimize_pid(params):
+                Kp, Ki, Kd = params
+                pid = ct.TransferFunction([Kp, Ki, Kd], [1, 0.001, 0.001])
+                closed_loop = ct.feedback(pid * plant, 1)
+                t, y = ct.step_response(closed_loop, T=np.linspace(0, 10, 1000))
+                # Objective: minimize the integral of the absolute error
+                error = 1 - y  # assuming unit step input
+                return np.sum(np.abs(error))
 
-        
-        # Perform pid optimization
-        optimized_params = minimize(
-            optimize_pid, 
-            [initial_kp, initial_ki, initial_kd], 
-            method = pid_training_method
-        ) 
+            # Perform pid optimization
+            optimized_params = minimize(
+                optimize_pid, 
+                [initial_kp, initial_ki, initial_kd], 
+                method = pid_training_method
+            ) 
 
-        optimized_Kp, optimized_Ki, optimized_Kd = optimized_params.x
+            optimized_Kp, optimized_Ki, optimized_Kd = optimized_params.x
         
+
         optimized_pid = ct.TransferFunction(
             [optimized_Kd, optimized_Kp, optimized_Ki], 
             [1, 0.001, 0.001]
@@ -78,8 +154,8 @@ def train_pid_controller(
             """
             pid_action = ct.forced_response(
                 optimized_pid, 
-                # T = np.array([0, 1e-6]), 
-                T = np.array([0, 1]), # TODO revisar essa implementação
+                T = np.array([0, 1e-6]), # 1e-6 para intervalos instantâneos
+                # T = np.array([0, 1]),  # 1 para intervalos longos
                 U = np.array([0, error])
             )
 
@@ -115,21 +191,20 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
         "g": ("constant", {"constant": 981}),                # g (gravity)
         "p1": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p1
         "p2": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p2
-        "p3": ("uniform", {"low": 0.07, "high": 0.17})       # p3
+        "p3": ("uniform", {"low": 0.07, "high": 0.17}),      # p3
     }
     seed = 42
     ensemble = EnsembleGenerator(distributions, seed)
 
     env = gymnasium.make("CascadeWaterTankEnv-V0", 
-                    scheduller             = scheduller, 
-                    simulation_model       = double_tank_simultaion,
+                    scheduller             = scheduller,
                     ensemble_params        = ensemble.generate_sample(), 
+                    termination_rule       = TerminationRule.INTERVALS,
+                    error_formula          = ErrorFormula.DIFFERENCE,
                     action_size            = 1,
                     x_size                 = 2,
-                    x_start_points         = None,#  [20, 20],
-                    tracked_point          = 'x2',
-                    termination_rule       = TerminationRule.INTERVALS,
-                    error_formula          = ErrorFormula.DIFFERENCE
+                    x_start_points         = None, #  [20, 20],
+                    tracked_point          = 'x2'
                     )
     env = DictToArrayWrapper(env)
     
@@ -171,12 +246,9 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
 
     trained_pid, pid_optimized_params = train_pid_controller(
         plant=water_tank_model, 
-        pid_training_method='BFGS', 
-        initial_kp=0, 
-        initial_ki=0, 
-        initial_kd=0
+        pid_training_method='ZN'
     )
-    
+
     return env, scheduller, ensemble, trained_pid, pid_optimized_params
 
 
@@ -223,14 +295,13 @@ def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     seed = 42
     ensemble = EnsembleGenerator(distributions, seed)
 
-    env = gymnasium.make("PhResidualWaterTreatmentEnv-V0", 
-                    scheduller             = scheduller, 
-                    simulation_model       = ph_simulation,
+    env = gymnasium.make("PhControlEnv-V0", 
+                    scheduller             = scheduller,
                     ensemble_params        = ensemble.generate_sample(), 
-                    action_size            = 1,
-                    x_size                 = 2,
+                    # action_size            = 1,
+                    # x_size                 = 2,
                     x_start_points         = None,
-                    tracked_point          = 'x2',
+                    # tracked_point          = 'x2',
                     termination_rule       = TerminationRule.INTERVALS,
                     error_formula          = ErrorFormula.DIFFERENCE,
                     )
@@ -257,22 +328,23 @@ def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     ph_control_model = sp.simplify(ph_control_model)
     
     # Injeta parâmetros e converte para ct.transferFunction
-    parameters_values = ensemble.get_all_samples()[0]
+    parameters_values = ensemble.generate_sample()
     ph_control_model.subs(parameters_values)
-    num, den = sp.fraction(water_tank_model)
-    num = [float(coef.evalf()) for coef in sp.Poly(num, s).all_coeffs()]
-    den = [float(coef.evalf()) for coef in sp.Poly(den, s).all_coeffs()]
-    water_tank_model = ct.TransferFunction(num, den)
+    # num, den = sp.fraction(ph_control_model)
+    # num = [float(coef.evalf()) for coef in sp.Poly(num, s).all_coeffs()]
+    # den = [float(coef.evalf()) for coef in sp.Poly(den, s).all_coeffs()]
+    # ph_control_model = ct.TransferFunction(num, den)
 
-    trained_pid, pid_optimized_params = train_pid_controller(
-        plant=ph_control_model, 
-        pid_training_method='BFGS', 
-        initial_kp=0, 
-        initial_ki=0, 
-        initial_kd=0
-    )
+    # trained_pid, pid_optimized_params = train_pid_controller(
+    #     plant=ph_control_model, 
+    #     pid_training_method='BFGS', 
+    #     initial_kp=0, 
+    #     initial_ki=0, 
+    #     initial_kd=0
+    # )
 
-    return env, scheduller, ensemble, trained_pid, pid_optimized_params
+    return env, scheduller, ensemble, None, {"optimized_Kp": 1, "optimized_Ki": 1, "optimized_Kd": 0}
+    # return env, scheduller, ensemble, trained_pid, pid_optimized_params
 
 
 def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
@@ -340,18 +412,21 @@ def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGene
     _tb = 10e-3
     _kb = 0.5
 
+    sample_frequency = 30     # [Hz]
+    dt = 1 / sample_frequency # [s]
+
     set_points = [5, 15, 10]
     intervals = [500, 500, 500]
     scheduller = Scheduller(set_points, intervals)
 
     # TODO encontrar distribuições diferentes de "constant" para esses parâmetros
     distributions = {
-        # Pacient
+        # Pacient (not used)
         "rp": ("constant", {"constant": _rp}),
         "c": ("constant", {"constant": _c}),
         "rl": ("constant", {"constant": _rl}),
 
-        # Blower
+        # Blower (not used)
         "tb": ("constant", {"constant": _rp}),
         "kb": ("constant", {"constant": _kb}),
 
@@ -370,13 +445,17 @@ def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGene
         # "t_c": ("constant", {"constant": 1 / (15 / 60)}),
         # "t_e": ("constant", {"constant": (1 / (15 / 60)) - 1 - 0.25}),
         # "_f_i": ("constant", {"constant": 350 / 1}),
+
+        # Model constants
+        "f_s": ("constant", {"constant": sample_frequency}),
+        "dt": ("constant", {"constant": dt}),
     }
+    
     seed = 42
     ensemble = EnsembleGenerator(distributions, seed)
     
     env = gymnasium.make("CpapEnv-V0", 
-                    scheduller             = scheduller, 
-                    simulation_model       = cpap_simulation,
+                    scheduller             = scheduller,
                     ensemble_params        = ensemble.generate_sample(),
                     x_size                 = 3,
                     x_start_points         = None,
@@ -415,7 +494,7 @@ def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGene
     cpap_model = ct.TransferFunction(filled_numerators, filled_denominators)
 
     # Train the PID controller
-    trained_pid, pid_optimized_params = train_pid_controller(cpap_model, pid_training_method='BFGS')
+    trained_pid, pid_optimized_params = train_pid_controller(cpap_model, pid_training_method='ZN')
 
     return env, scheduller, ensemble, trained_pid, pid_optimized_params
 
@@ -439,12 +518,10 @@ experiments = {
     },
 }
 
-create_env_function, logs_folder_path, tracked_point = experiments['CPAP'].values()
+create_env_function, logs_folder_path, tracked_point = experiments['double_water_tank'].values()
 env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_function()
 
-# y = trained_pid(44.358696)
-# print(f"{y=}")
-# exit()
+
 pime_ppo_controller = PIME_PPO(
                             env, 
                             scheduller, 
