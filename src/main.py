@@ -192,6 +192,7 @@ def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
         "p1": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p1
         "p2": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p2
         "p3": ("uniform", {"low": 0.07, "high": 0.17}),      # p3
+        "dt": ("constant", {"constant": 2}),                 # dt sample time (seconds)
     }
     seed = 42
     ensemble = EnsembleGenerator(distributions, seed)
@@ -291,6 +292,7 @@ def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, Ensemb
     distributions = {
         "p1": ("uniform", {"low": 0.005, "high": 0.015}),
         "p2": ("uniform", {"low": 0.0015, "high": 0.0025}),
+        "dt": ("constant", {"constant": 20}),                 # dt sample time (seconds)
     }
     seed = 42
     ensemble = EnsembleGenerator(distributions, seed)

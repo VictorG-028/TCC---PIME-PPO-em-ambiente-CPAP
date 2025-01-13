@@ -9,5 +9,5 @@ __all__ = [base_set_point_env]
 
 register("BaseSetPointEnv-V0", entry_point="environments.base_set_point_env:BaseSetPointEnv")
 register("CascadeWaterTankEnv-V0", entry_point="environments.cascade_water_tank_env:CascadeWaterTankEnv")
-register("PhControl-V0", entry_point="environments.residual_water_treatment_env:PhControl")
+register("PhControlEnv-V0", entry_point="environments.ph_control_env:PhControl")
 register("CpapEnv-V0", entry_point="environments.CPAP_env:CpapEnv")

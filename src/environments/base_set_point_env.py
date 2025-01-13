@@ -5,10 +5,40 @@ from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
 from modules.EnsembleGenerator import EnsembleGenerator
 
+import functools
+import inspect
+
 import numpy as np
 import gymnasium
 from gymnasium import spaces
 
+################################################################################
+
+def debug_print_extra_info(func): 
+    """
+    Puts a string cotaning the method name before the print statement.
+    """
+    @functools.wraps(func) 
+    def wrapper(*args, **kwargs): 
+        frame = inspect.currentframe().f_back 
+
+        local_env = frame.f_locals.get('env') 
+        local_self = frame.f_locals.get('self') 
+
+        # First time is the 'env' inside locals, second and onwards is the 'self'
+        if local_env:
+            class_name = local_env.unwrapped.__class__.__name__
+        elif local_self:
+            class_name = local_self.unwrapped.__class__.__name__
+        else:
+            raise Exception("[Decorator debug_print_extra_info error] Can't find 'env' or 'self' in locals")
+
+        method_name = frame.f_code.co_name 
+        print(f"[{class_name}.{method_name}] ", end="") 
+        return func(*args, **kwargs) 
+    return wrapper
+
+################################################################################
 
 
 class BaseSetPointEnv(gymnasium.Env):
@@ -23,7 +53,7 @@ class BaseSetPointEnv(gymnasium.Env):
             start_points (opcional): Vetor x inicial. Caso null, então o vetor é gerado aleatoriamente.
             termination_rule (Callable): TODO
             error_formula (Callable): TODO
-            tracked_point (str): TODO
+            tracked_point (str): "x{number}" like string that representes the x_vector tracked element
             extra_inputs (Dict[str, any]): Contém quaisquer variáveis ​​extras que entram no modelo de simulação. A key 'dt' geralmente é expressa em segundos.
             render_mode (Literal["terminal"]): Onlçy supports terminal rendering.
     
@@ -38,7 +68,7 @@ class BaseSetPointEnv(gymnasium.Env):
             start_points (opcional): Vetor x inicial. Caso null, então o vetor é gerado aleatoriamente.
             termination_rule (Callable): TODO
             error_formula (Callable): TODO
-            tracked_point (str): TODO
+            tracked_point (str): cadeia de caracteres "x{número}" que representa o elemento rastreado do x_vector
             extra_inputs (Dict[str, any]): Holds any extra variables that goes into simulation model. dt key is usualy expressed in seconds.
             render_mode (Literal["terminal"]): Apenas suporta renderização no terminal.
     """
@@ -50,15 +80,13 @@ class BaseSetPointEnv(gymnasium.Env):
     def __init__(
             self,
             scheduller: Scheduller,
-            simulation_model: Callable,
             ensemble_params: dict[str, np.float64],
+            termination_rule: TerminationRule | Callable = TerminationRule.INTERVALS,
+            error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE_SQUARED,
             action_size: int = 1,
             x_size: int = 1,
             x_start_points: Optional[list[np.float64]] = None,
-            termination_rule: TerminationRule | Callable = TerminationRule.INTERVALS,
-            error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE_SQUARED,
             tracked_point: str = 'x1',
-            extra_inputs: Dict[str, any] = {'dt': 1},
             max_step: Optional[int] = None,
             render_mode: Literal["terminal"] = "terminal",
             should_define_simple_action_and_obs_spaces: bool = False,
@@ -71,12 +99,6 @@ class BaseSetPointEnv(gymnasium.Env):
 
         assert x_size is not None and is_correct_size, \
             f"Must initialize x_size with valid integer. Recived '{x_size=}'."
-
-        assert 'dt' in extra_inputs.keys(), \
-            "Must have 'dt' key inside extra_inputs dict."
-        
-        assert extra_inputs['dt'] > 0, \
-            "extra_inputs['dt'] must be a positive value."
         
         if (termination_rule == TerminationRule.MAX_STEPS):
             assert max_step is not None, \
@@ -85,13 +107,11 @@ class BaseSetPointEnv(gymnasium.Env):
         super(BaseSetPointEnv, self).__init__()
 
         self.scheduller        = scheduller
-        self.simulation_model  = simulation_model
         self.ensemble_params   = ensemble_params
         self.action_size       = action_size
         self.x_size            = x_size
         self.x_start_points    = x_start_points
         self.tracked_point     = tracked_point
-        self.extra_inputs      = extra_inputs
         self.max_step          = max_step
         self.render_mode       = render_mode
 
@@ -148,9 +168,8 @@ class BaseSetPointEnv(gymnasium.Env):
         random_sample = self.observation_space.sample()
 
         # Remove os dois últimos valores (y_ref e z_t)
-        keys_to_remove = ["y_ref", "z_t"]
-        for key in keys_to_remove:
-            random_sample.pop(key, None)
+        random_sample.pop("y_ref", None)
+        random_sample.pop("z_t", None)
 
         random_x_vector = {
             f"x{i+1}": random_value[0]
@@ -190,14 +209,18 @@ class BaseSetPointEnv(gymnasium.Env):
         return self.observation, {}
     
 
+    @debug_print_extra_info
     def step(self, action: np.float64):
         set_point: np.float64 = self.scheduller.get_set_point_at(step=self.timestep)
-        # print(f"[set_point_env.step] x_vector={list(self.observation.values())[0:-1]}")
+        print(f"{action=}")
+        # print(f"x_vector={list(self.observation.values())[0:-2]}")
+        # print(f"y_ref={list(self.observation.values())[-2]}")
+        # print(f"z_t={list(self.observation.values())[-1]}")
+        # print(f"{self.ensemble_params=}")
         x_vector: dict[str, np.float64] = self.simulation_model(
             action, 
             *list(self.observation.values())[0:-2], # Get only x1 .. xn values; don't use y_ref and z_t (last 2 values)
-            **self.ensemble_params,
-            **self.extra_inputs,
+            **self.ensemble_params
         )
 
         self.reward = self.error_formula(x_vector[self.tracked_point], set_point)
@@ -214,3 +237,7 @@ class BaseSetPointEnv(gymnasium.Env):
 
         # print(f"RETURNED OBS: {self.observation=}")
         return self.observation, self.reward, self.done, False, {}
+    
+
+    def simulation_model(self, u_t, *x_vector, **ensemble_params):
+        raise NotImplementedError("Must crate a base class that defines simulation_model using BaseSetPointEnv as super class")
