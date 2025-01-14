@@ -21,38 +21,33 @@ from scipy.optimize import minimize
 ################################################################################
 
 def train_pid_with_ZN_method(plant: ct.TransferFunction, 
-                             pid_type: Literal["P", "PI", "PID"] = "PI",
-                             plot: bool = False,
-                             ) -> tuple[float, float, float]:
-    t, y = ct.step_response(plant)
+                            pid_type: Literal["P", "PI", "PID"] = "PI",
+                            plot: bool = True,
+                            ) -> tuple[float, float, float]:
+    """
+        Find PID gains using the Ziegler-Nichols reaction curve method.
+    """
+    # step_y is the height of the step over time
+    # plany_y is the height of the output with the respective step_y as input
+    time, plant_y = ct.step_response(plant)
+    step_y = np.ones_like(time)
     info = ct.step_info(plant)
 
     # Calculando primeira derivada (dy/dt) e segunda derivada (d²y/dt²)
-    dy_dt = np.gradient(y, t)
-    d2y_dt2 = np.gradient(dy_dt, t)
+    dy_dt = np.gradient(plant_y, time)
+    d2y_dt2 = np.gradient(dy_dt, time)
 
     # Encontrando o ponto de inflexão (mudança de sinal na segunda derivada)
     inflexion_idx = np.where(np.diff(np.sign(d2y_dt2)))[0][0]
-    t_inflexion = t[inflexion_idx] # x
-    y_inflexion = y[inflexion_idx] # y
-    slope = dy_dt[inflexion_idx]   # Derivada no ponto
+    t_inflexion = time[inflexion_idx]    # x
+    y_inflexion = plant_y[inflexion_idx] # y
+    slope = dy_dt[inflexion_idx]         # Derivada no ponto
 
-    # Definindo a reta tangente
-    # def tangente(t: float) -> float:
-    #     """tangente(t) = f(t) = y = f'(t_0) ⋅ (t - t_0) + f(t_0)
-    #     - t_0 e y_inflexion=f(t_0) são o tempo e valor no ponto de inflexão.
-    #     - f'(t_0) é o valor da derivada no ponto de inflexão (dy/dt)
-    #     """
-    #     return slope * (t - t_inflexion) + y_inflexion
-    
-    # t_tangent = np.linspace(t[0], t[-1], 1000)
-    # y_tangent = tangente(t_tangent)
-
-    # Interseção com y=0
+    # Interseção da tangente com y=0
     t_intersect_y0 = t_inflexion - y_inflexion / slope
 
-    # Interseção com y=h (escolha o valor de h)
-    h = info["Peak"]  # Valor mais alto
+    # Interseção da tangente com y=h (escolha o valor de h)
+    h: float = info["Peak"]  # Valor mais alto
     t_intersect_yh = t_inflexion + (h - y_inflexion) / slope
 
     L = t_intersect_y0 
@@ -74,12 +69,40 @@ def train_pid_with_ZN_method(plant: ct.TransferFunction,
         raise ValueError("Invalid PID type. Choose between 'P', 'PI' or 'PID'.")
 
     if (plot):
-        plt.plot(t, y)
+        
+        def tangente(t: float) -> float:
+            """tangente(t) = f(t) = y = f'(t_0) ⋅ (t - t_0) + f(t_0)
+            - t_0 e y_inflexion=f(t_0) são o tempo e valor no ponto de inflexão.
+            - f'(t_0) é o valor da derivada no ponto de inflexão (dy/dt)
+            """
+            return slope * (t - t_inflexion) + y_inflexion
+
+        
+        tangent_x = np.linspace(t_intersect_y0, t_intersect_yh, 1000) # time[-1] = info["PeakTime"]
+        tangent_y = tangente(tangent_x)
+
+        plt.plot(time, step_y, linestyle='--', color='black', label="Step inputs")
+        plt.plot(tangent_x, tangent_y, color='red', linestyle='--', label="Tangent line")
+        plt.plot(time, plant_y, color='blue', label="Plant output")
+        plt.axhline(y=h, color="#b0b0b0", linestyle='-', label=f"High point: h={h:.2f}")
+        plt.axhline(y=0, color="#b0b0b0", linestyle='-')
+
+        # plt.text(L / 2, -0.1, f"T={T:.2f}", color='black', fontsize=8, ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
+        # plt.text(T / 2, -0.1, f"L={L:.2f}", color='black', fontsize=8, ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
+        plt.text(L, -0.03, f"L", color='black', fontsize=8, ha='center', va='center')
+        plt.text(T+L, h+0.03, f"T", color='black', fontsize=8, ha='center', va='center')
+        
+        # current_ticks = plt.xticks()[0]
+        # plt.xticks(list(current_ticks) + [L] + [L+T])
+
         plt.title("Resposta ao Degrau")
         plt.xlabel("Tempo (s)")
         plt.ylabel("Saída")
+        plt.legend()
         plt.grid()
         plt.show()
+
+        exit()
 
     # Other ZN method (unused)
     # kp = 100000
