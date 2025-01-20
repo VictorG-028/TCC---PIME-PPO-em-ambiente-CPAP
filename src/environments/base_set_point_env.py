@@ -7,6 +7,7 @@ from modules.EnsembleGenerator import EnsembleGenerator
 
 import functools
 import inspect
+import re
 
 import numpy as np
 import gymnasium
@@ -51,8 +52,8 @@ class BaseSetPointEnv(gymnasium.Env):
             ensemble_params (Ensemble): Controla os parâmetros aleatórios das simulações.
             x_size (int): Size of x vector inside observation
             start_points (opcional): Vetor x inicial. Caso null, então o vetor é gerado aleatoriamente.
-            termination_rule (Callable): TODO
-            error_formula (Callable): TODO
+            termination_rule (Callable): Function that defines when episode should end
+            error_formula (Callable): Function that defined how to calculate the reward (error)
             tracked_point (str): "x{number}" like string that representes the x_vector tracked element
             extra_inputs (Dict[str, any]): Contém quaisquer variáveis ​​extras que entram no modelo de simulação. A key 'dt' geralmente é expressa em segundos.
             render_mode (Literal["terminal"]): Onlçy supports terminal rendering.
@@ -66,8 +67,8 @@ class BaseSetPointEnv(gymnasium.Env):
             ensemble_params (Ensemble): Controla os parâmetros aleatórios das simulações.
             x_size (int): Size of x vector inside observation
             start_points (opcional): Vetor x inicial. Caso null, então o vetor é gerado aleatoriamente.
-            termination_rule (Callable): TODO
-            error_formula (Callable): TODO
+            termination_rule (Callable): Função que detemrina quando o episódio deve terminar
+            error_formula (Callable): Função que define como calcular a recompensa (erro)
             tracked_point (str): cadeia de caracteres "x{número}" que representa o elemento rastreado do x_vector
             extra_inputs (Dict[str, any]): Holds any extra variables that goes into simulation model. dt key is usualy expressed in seconds.
             render_mode (Literal["terminal"]): Apenas suporta renderização no terminal.
@@ -80,7 +81,7 @@ class BaseSetPointEnv(gymnasium.Env):
     def __init__(
             self,
             scheduller: Scheduller,
-            ensemble_params: dict[str, np.float64],
+            start_ensemble_params: dict[str, np.float64],
             termination_rule: TerminationRule | Callable = TerminationRule.INTERVALS,
             error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE_SQUARED,
             action_size: int = 1,
@@ -100,6 +101,9 @@ class BaseSetPointEnv(gymnasium.Env):
         assert x_size is not None and is_correct_size, \
             f"Must initialize x_size with valid integer. Recived '{x_size=}'."
         
+        regex = r"x(?<!0)\d+" # (?<!0) rejects "x0", "x01", "x02" cases
+        assert bool(re.match(regex, tracked_point)), f"tracked_point_name must be like 'x[integer]'. Ex: 'x1', 'x2', 'x3', etc."
+        
         if (termination_rule == TerminationRule.MAX_STEPS):
             assert max_step is not None, \
                 "max step can't be None when termination rule is MAX_STEPS."
@@ -107,7 +111,7 @@ class BaseSetPointEnv(gymnasium.Env):
         super(BaseSetPointEnv, self).__init__()
 
         self.scheduller        = scheduller
-        self.ensemble_params   = ensemble_params
+        self.ensemble_params   = start_ensemble_params
         self.action_size       = action_size
         self.x_size            = x_size
         self.x_start_points    = x_start_points

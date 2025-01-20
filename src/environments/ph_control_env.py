@@ -1,13 +1,18 @@
+from algorithms.PID_Controller import PIDController
 from environments.base_set_point_env import BaseSetPointEnv
 from typing import Callable, Literal, Optional
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
 from modules.EnsembleGenerator import EnsembleGenerator
+from wrappers.DictToArray import DictToArrayWrapper
 
 import numpy as np
+import sympy as sp
+import control as ct
 import gymnasium
 from gymnasium import spaces
+
 
 
 
@@ -38,7 +43,7 @@ class PhControl(BaseSetPointEnv):
 
         super().__init__(
             scheduller=scheduller,
-            ensemble_params=ensemble_params,
+            start_ensemble_params=ensemble_params,
             termination_rule=termination_rule,
             error_formula=error_formula,
             action_size=1,
@@ -102,3 +107,99 @@ class PhControl(BaseSetPointEnv):
             ph_t = 14
         
         return {"x1": ph_t, "x2": hcl_concentration_t}
+
+
+    @staticmethod
+    def create_ph_control_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
+        """ ## Variable Glossary
+
+        s
+            Variável complexa de Laplace. 
+            Usada para representar a frequência em análises de sistemas no domínio de Laplace.
+
+        u_t
+            Ação; Dosagem do reagente (aumenta a concentração da molécula HCL);
+        ph_t
+            É calculado usando a formula do paper x(t) = -log_10( [H+] )(t)
+            Representa o valor do pH no timestep t.
+        hcl_concentration_t
+            TODO
+        delta_hcl_t
+            O quanto a concentração de HCL muda depois ao executar uma ação u_t.
+        h_concentration_t
+            [H+] = Concentração do ion H+ no timestep t.
+        p1
+            p1 = ([HCL,C] * q_[HCL,C]) / V
+            [HCl,C] = concentração de ácido clorídrico 
+            q_[HCL,C] = constante de "flow" de [HCl,C] 
+            V = volume do tanque de reação
+        p2
+            p2 = q_ww / V 
+            q_ww = taxa de fluxo de entrada de água residual
+            V = volume do tanque de reação
+        k_reagent
+            [!] não usado na versão atual
+            Representa a eficiência do reagente na neutralização do pH
+        """
+
+        set_points = [5, 15, 10]
+        intervals = [5, 5, 5]
+        scheduller = Scheduller(set_points, intervals) 
+        distributions = {
+            "p1": ("uniform", {"low": 0.005, "high": 0.015}),
+            "p2": ("uniform", {"low": 0.0015, "high": 0.0025}),
+            "dt": ("constant", {"constant": 20}),                 # dt sample time (seconds)
+        }
+        seed = 42
+        ensemble = EnsembleGenerator(distributions, seed)
+
+        env = gymnasium.make("PhControlEnv-V0", 
+                        scheduller             = scheduller,
+                        ensemble_params        = ensemble.generate_sample(), 
+                        # action_size            = 1,
+                        # x_size                 = 2,
+                        x_start_points         = None,
+                        # tracked_point          = 'x2',
+                        termination_rule       = TerminationRule.INTERVALS,
+                        error_formula          = ErrorFormula.DIFFERENCE,
+                        )
+        env = DictToArrayWrapper(env)
+        
+        scheduller = Scheduller(set_points, intervals) 
+
+        # Define model symbols
+        t = sp.symbols('t', real=True, positive=True)
+        s = sp.symbols('s')
+        hcl_concentration_t = sp.Function('hcl_concentration_t')(t)
+        u_t = sp.Function('u_t')(t)
+        p1, p2 = sp.symbols('p1 p2')
+        hcl_s = sp.Function('HCL')(s)
+        u_s = sp.Function('U')(s)
+        delta_hcl_t = -p2 * hcl_concentration_t + p1 * u_t
+
+
+        # Calculate the model transfer function using laplace transform
+        hcl_s = sp.laplace_transform(hcl_concentration_t, t, s, noconds=True)
+        u_s = sp.laplace_transform(u_t, t, s, noconds=True)
+        delta_hcl_t_laplace_transformed = sp.Eq(s * hcl_s, -p2 * hcl_s + p1 * u_s)
+        ph_control_model = sp.solve(delta_hcl_t_laplace_transformed, hcl_s)[0] / u_s
+        ph_control_model = sp.simplify(ph_control_model)
+        
+        # Injeta parâmetros e converte para ct.transferFunction
+        parameters_values = ensemble.generate_sample()
+        ph_control_model.subs(parameters_values)
+        # num, den = sp.fraction(ph_control_model)
+        # num = [float(coef.evalf()) for coef in sp.Poly(num, s).all_coeffs()]
+        # den = [float(coef.evalf()) for coef in sp.Poly(den, s).all_coeffs()]
+        # ph_control_model = ct.TransferFunction(num, den)
+
+        # trained_pid, pid_optimized_params = PIDController.train_pid_controller(
+        #     plant=ph_control_model, 
+        #     pid_training_method='BFGS', 
+        #     initial_kp=0, 
+        #     initial_ki=0, 
+        #     initial_kd=0
+        # )
+
+        return env, scheduller, ensemble, None, {"optimized_Kp": 1, "optimized_Ki": 1, "optimized_Kd": 0}
+        # return env, scheduller, ensemble, trained_pid, pid_optimized_params

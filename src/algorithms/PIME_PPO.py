@@ -1,6 +1,7 @@
 from typing import Callable, Optional
 import math
 import os
+import re
 import gymnasium
 import numpy as np
 from stable_baselines3 import PPO
@@ -20,7 +21,7 @@ from enums.ErrorFormula import ErrorFormula
 from modules.EnsembleGenerator import EnsembleGenerator
 from modules.Scheduller import Scheduller
 
-Y_REF = 2
+
 
 class CustomMLP(nn.Module):
     def __init__(self, 
@@ -152,7 +153,7 @@ class PIME_PPO:
                  tracked_point_name: str = 'x1',                            # string like "x[integer]"
                  verbose: int = 1,                                          # 
                  logs_folder_path: str = "logs/ppo/",                       # PPO logs
-                 buffer_size: Optional[int] = None,                         # buffer_size = ensemble_size * episode_lenght (minimum size needed to not get buffer overflow error) # TODO: perceber q largura do episódio depende de teremination rule e dar um jeito de descobrir quanto vai durar
+                 buffer_size: Optional[int] = None,                         # buffer_size = ensemble_size * episode_lenght (minimum size needed to not get buffer overflow error)
                  episodes_per_sample: int = 5,                              # Number of episodes collected for one parameter set
                  gae_lambda: float = 0.97,                                  # PPO param
                  c1: float = 1.0,                                           # not used
@@ -160,10 +161,18 @@ class PIME_PPO:
                  integrator_bounds: list[int, int] = [-25, 25],             # Clip para pid (formula do integrator)
                  sample_period: int = 1                                     # Euler method sampling period (dt)
                  ) -> None:
-        
+        """
+        #### Observações importantes:
+        buffer size depende do tamanho do episódio e do tamanho do ensemble. 
+        O tamanho do episódio depende da termination rule. 
+        O tamanho do ensemble é definido pelo usuário.
+        """
         assert env.unwrapped.error_formula is not None, \
             "Must have an error_formula (type ErrorFormula or Callable[y:float, y_ref:float], output:float]) propertie inside env."
         
+        regex = r"x(?<!0)\d+" # (?<!0) rejects "x0", "x01", "x02" cases
+        assert bool(re.match(regex, tracked_point_name)), f"tracked_point_name must be like 'x[integer]'. Ex: 'x1', 'x2', 'x3', etc."
+
         if pid_controller is not None:
             self.pid_controller = pid_controller
         else:
@@ -184,18 +193,25 @@ class PIME_PPO:
         # print(flat_obs_space, type(flat_obs_space))
         # print("@@@@@@@@@@@@@@@@@@")
 
-        # TODO: esse if engessa o código da classe TerminationRule, é preciso encotrar uma outra forma de obter steps_per_episode (talvez colocar o input direto no __init__, mas isso permite o step do BaseEnv calcular self.done de forma que gere o erro de falta de memória no buffer ou gere uma situação sem erros, mas que usa mais emmória no buffer do que o necessário. Colocar steps_per_episode como input no __init__ do PIME_PPO.py também deixa o código difícil de usar e o ideal eh não criar dificuldade)
+        # TODO: esse if engessa o código da classe TerminationRule, pois a cada novo termination_rule é preciso vir aqui atualizar um novo caso. É preciso encotrar uma outra forma de obter steps_per_episode (talvez colocar o input direto no __init__, mas isso permite o step do BaseEnv calcular self.done de forma que gere o erro de falta de memória no buffer ou gere uma situação sem erros, mas que usa mais emmória no buffer do que o necessário. Colocar steps_per_episode como input no __init__ do PIME_PPO.py também deixa o código difícil de usar e o ideal eh não criar dificuldade)
         if env.unwrapped.max_step is not None:
             self.steps_per_episode = env.unwrapped.max_step
         else:
             self.steps_per_episode = env.unwrapped.scheduller.intervals_sum
 
         if buffer_size is None:
-            buffer_size = self.steps_per_episode * ensemble_size * episodes_per_sample # * self.scheduller.intervals_sum 
+            # n_envs = buffer size, uma vez que num_envs = 1
+            buffer_size = self.steps_per_episode * ensemble_size * episodes_per_sample
                           
         self.buffer_size = buffer_size
             
         print(f"{buffer_size=}")
+        """Lembrar:
+            Definir buffer_size usando rollout_buffer_kwargs ou buffer_size não funciona. 
+            Olhando o código fonte, precisa definir n_steps que é  "the number 
+            of experiences which is collected from a single environment under 
+            the current policy before its next update".
+        """
         self.ppo = PPO(CustomActorCriticPolicy, 
                        env, 
                        verbose               = verbose,              #
@@ -204,10 +220,9 @@ class PIME_PPO:
                        gae_lambda            = gae_lambda,           # Factor for trade-off of bias vs variance for Generalized Advantage Estimator. Equivalent to classic advantage when set to 1.
                        gamma                 = 0.99,                 # Discount factor
                        rollout_buffer_class  = RolloutBuffer,        #
-                       # Definir o buffer_size usando rollout_buffer_kwargs ou buffer_size não funciona. Olhando o código fonte, precisa definir n_steps que é "the number of experiences which is collected from a single environment under the current policy before its next update"
-                    #    rollout_buffer_kwargs = {'buffer_size': buffer_size},
-                    #    buffer_size           = buffer_size,
-                       n_steps               = self.buffer_size # TODO: descobrir por que remover shceduller.intervals_sum calcula corretamente o n_envs (lembrar: n_envs = buffer size, uma vez que num_envs = 1)
+                       # rollout_buffer_kwargs = {'buffer_size': buffer_size},
+                       # buffer_size           = buffer_size,
+                       n_steps               = self.buffer_size
                        )
         
         # Setup logger (mandatory to avoid "AttributeError: 'PPO' object has no attribute '_logger'.")
@@ -218,7 +233,7 @@ class PIME_PPO:
         new_logger = configure(logs_folder_path, ["stdout", "csv", "tensorboard"])
         self.ppo.set_logger(new_logger)
 
-        # TODO: usar REGEX na string tracked_point_name para validar que é "x[:number:]"
+
 
 
     def train(self, steps_to_run = 100_000) -> None:

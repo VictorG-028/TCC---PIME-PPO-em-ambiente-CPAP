@@ -1,11 +1,15 @@
+from algorithms.PID_Controller import PIDController
 from environments.base_set_point_env import BaseSetPointEnv
 from typing import Callable, Literal, Optional
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
 from modules.EnsembleGenerator import EnsembleGenerator
+from wrappers.DictToArray import DictToArrayWrapper
 
 import numpy as np
+import sympy as sp
+import control as ct
 import gymnasium
 from gymnasium import spaces
 
@@ -51,7 +55,7 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         
         super().__init__(
             scheduller=scheduller,
-            ensemble_params=ensemble_params,
+            start_ensemble_params=ensemble_params,
             termination_rule=termination_rule,
             error_formula=error_formula,
             action_size=1,
@@ -117,3 +121,100 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         l2_t = max([0, l2_t + delta_l2_t])
         
         return {"x1": l1_t * dt, "x2": l2_t * dt}
+    
+
+    @staticmethod
+    def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
+        """ ## Variable Glossary
+
+        s
+            Variável complexa de Laplace. 
+            Usada para representar a frequência em análises de sistemas no domínio de Laplace.
+
+        g
+            Unidade de medida: [cm/s²]
+            Gravity. Gravidade.
+        p1  
+            Unidade de medida: adimensional
+            Razão entre a área do abertura do tanque superior e a área da seção transversal do tanque superior.  
+            p1 = a1 / A1, onde a1 é a área do abertura e A1 é a área do tanque.  
+
+        p2  
+            Unidade de medida: adimensional
+            Razão entre a área do abertura do tanque inferior e a área da seção transversal do tanque inferior.  
+            p2 = a2 / A2, onde a2 é a área do abertura e A2 é a área do tanque.
+
+        p3  
+            Unidade de medida: [m/s⋅V]
+            Razão entre a constante da bomba e a área do tanque superior.  
+            p3 = Kpump / A1, onde Kpump [m³/s⋅V] é a constante da bomba e A1 [m²] é a área do tanque superior.
+        """
+        
+        set_points = [3, 6, 9, 4, 2] # [cm]
+        intervals = [400, 400, 400, 400, 400] # [s]
+        scheduller = Scheduller(set_points, intervals) 
+        distributions = {
+            "g": ("constant", {"constant": 981}),                # g (gravity) [cm/s²]
+            "p1": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p1
+            "p2": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p2
+            "p3": ("uniform", {"low": 0.07, "high": 0.17}),      # p3
+            "dt": ("constant", {"constant": 2}),                 # dt sample time [s]
+        }
+        seed = 42
+        ensemble = EnsembleGenerator(distributions, seed)
+
+        env = gymnasium.make("CascadeWaterTankEnv-V0", 
+                        scheduller             = scheduller,
+                        ensemble_params        = ensemble.generate_sample(), 
+                        termination_rule       = TerminationRule.INTERVALS,
+                        error_formula          = ErrorFormula.DIFFERENCE,
+                        action_size            = 1,
+                        x_size                 = 2,
+                        x_start_points         = None, #  [20, 20],
+                        tracked_point          = 'x2'
+                        )
+        env = DictToArrayWrapper(env)
+        
+        scheduller = Scheduller(set_points, intervals) 
+        
+        # Define model symbols
+        t = sp.symbols('t', real=True, positive=True)
+        s = sp.symbols('s')
+        l1_t = sp.Function('l1_t')(t)
+        l2_t = sp.Function('l2_t')(t)
+        u_t = sp.Function('u_t')(t)
+        g, p1, p2, p3 = sp.symbols('g p1 p2 p3')
+        l1_s = sp.Function('L1')(s)
+        l2_s = sp.Function('L2')(s)
+        u_s = sp.Function('U')(s)
+
+        # Define model equations
+        delta_l1_t = -p1 * sp.sqrt(2 * g * l1_t) + p3 * u_t
+        delta_l2_t = p1 * sp.sqrt(2 * g * l1_t) - p2 * sp.sqrt(2 * g * l2_t)
+        
+        # Apply Laplace transform
+        l1_s = sp.laplace_transform(l1_t, t, s, noconds=True)
+        l2_s = sp.laplace_transform(l2_t, t, s, noconds=True)
+        u_s = sp.laplace_transform(u_t, t, s, noconds=True)
+        delta_l1_t_laplace = sp.Eq(s * l1_s, -p1 * sp.sqrt(2 * g) * l1_s + p3 * u_s)
+        delta_l2_t_laplace = sp.Eq(s * l2_s, p1 * sp.sqrt(2 * g) * l1_s - p2 * sp.sqrt(2 * g) * l2_s)
+        l1_s_solution = sp.solve(delta_l1_t_laplace, l1_s)[0]
+        l1_s_solution = sp.simplify(l1_s_solution)
+        l2_s_solution = sp.solve(delta_l2_t_laplace.subs(l1_s, l1_s_solution), l2_s)[0] / u_s
+        water_tank_model = sp.simplify(l2_s_solution)
+
+        # Injeta parâmetros e converte para ct.transferFunction
+        parameters_values = ensemble.generate_sample()
+        water_tank_model = water_tank_model.subs(parameters_values)
+        num, den = sp.fraction(water_tank_model)
+        num = [float(coef.evalf()) for coef in sp.Poly(num, s).all_coeffs()]
+        den = [float(coef.evalf()) for coef in sp.Poly(den, s).all_coeffs()]
+        water_tank_model = ct.TransferFunction(num, den)
+
+        trained_pid, pid_optimized_params = PIDController.train_pid_controller(
+            plant=water_tank_model, 
+            pid_training_method='ZN',
+            pid_type="PI"
+        )
+
+        return env, scheduller, ensemble, trained_pid, pid_optimized_params

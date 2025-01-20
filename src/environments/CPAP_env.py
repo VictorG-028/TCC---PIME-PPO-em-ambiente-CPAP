@@ -1,13 +1,18 @@
+from algorithms.PID_Controller import PIDController
 from environments.base_set_point_env import BaseSetPointEnv
 from typing import Callable, Dict, Literal, Optional, TypedDict
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
 from modules.EnsembleGenerator import EnsembleGenerator
+from wrappers.DictToArray import DictToArrayWrapper
 
 import numpy as np
+import sympy as sp
+import control as ct
 import gymnasium
 from gymnasium import spaces
+
 
 
 class Lung:
@@ -111,7 +116,7 @@ class CpapEnv(BaseSetPointEnv):
 
         super().__init__(
             scheduller=scheduller,
-            ensemble_params=ensemble_params,
+            start_ensemble_params=ensemble_params,
             termination_rule=termination_rule,
             error_formula=error_formula,
             action_size=1,
@@ -227,4 +232,161 @@ class CpapEnv(BaseSetPointEnv):
         _t = current_time - start_time
         _rc = lung._r_aw * lung.c_rs
         return (ventilator.peep - last_pressuse) / lung._r_aw * np.exp(-_t / _rc)
+    
+
+    @staticmethod
+    def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
+        """ ## Variable Glossary
+
+        s
+            Variável complexa de Laplace. 
+            Usada para representar a frequência em análises de sistemas no domínio de Laplace.
+
+        ### Pacient variables
+        rp
+            Unidade de medida: [cmH2O/ml/s]
+            Inspiratory Resistance. Resistência Inspiratória.
+            Representa a resistência ao fluxo de ar durante a inspiração.
+            Originally [cmH2O/L/s].
+        rl
+            Unidade de medida: [cmH2O/ml/s]
+            Leak Resistance. Resistência a vazamentos.
+            Representa a resistência ao fluxo de ar devido a vazamentos no sistema.
+            Originally 48.5 [cmH2O/L/min].
+            Intentional leakage resistance from Philips Respironics, model Amara Gel at 30 L/min. 
+        c
+            Unidade de medida: [ml/cmH2O]
+            Static Compliance. Complacência estática.
+            Representa a capacidade do pulmão de se expandir e contrair em resposta a mudanças de pressão.
+
+        ### Blower variables
+        tb
+            Unidade de medida: [s]
+            Blower constant time. Constante de tempo do soprador.
+            Representa o tempo necessário para o soprador atingir uma fração significativa de sua resposta final.
+        kb
+            Unidade de medida: [cm³/s/V]
+            V = voltagem aplicada ao soprador.
+            cm³/s = fluxo volumétrico
+            Blower Gain. Ganho do sporador.
+
+        ### PID variables
+        kp
+            Unidade de medida: adimensional
+            O ganho proporcional ajusta a contribuição proporcional ao erro no sinal de controle.
+        ki 
+            Unidade de medida: [1/s]
+            O ganho integral ajusta a contribuição proporcional à integral do erro ao longo do tempo.
+        kd
+            Unidade de medida: [s] 
+            O ganho derivativo ajusta a contribuição proporcional à taxa de variação do erro. 
+        """
+
+        # Define model values
+        patient = {
+            # hh: Heated Humidifier.
+            # hme: Heat-and-moisture exchanger.
+            'Heated Humidifier, Normal':             {'rp': 10e-3, 'c': 50, 'rl': 48.5 * 60 / 1000 },
+            'Heated Humidifier, COPD':               {'rp': 20e-3, 'c': 60, 'rl': 48.5 * 60 / 1000 },
+            'Heated Humidifier, mild ARDS':          {'rp': 10e-3, 'c': 45, 'rl': 48.5 * 60 / 1000 },
+            'Heated Humidifier, moderate ARDS':      {'rp': 10e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
+            'Heated Humidifier, severe ARDS':        {'rp': 10e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
+            'Heat Moisture Exchange, Normal':        {'rp': 15e-3, 'c': 50, 'rl': 48.5 * 60 / 1000 },
+            'Heat Moisture Exchange, COPD':          {'rp': 25e-3, 'c': 60, 'rl': 48.5 * 60 / 1000 },
+            'Heat Moisture Exchange, mild ARDS':     {'rp': 15e-3, 'c': 45, 'rl': 48.5 * 60 / 1000 },
+            'Heat Moisture Exchange, moderate ARDS': {'rp': 15e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
+            'Heat Moisture Exchange, severe ARDS':   {'rp': 15e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
+        }
+        _rp, _c, _rl = patient['Heated Humidifier, Normal'].values()
+        _tb = 10e-3
+        _kb = 0.5
+
+        sample_frequency = 30     # [Hz]
+        dt = 1 / sample_frequency # [s]
+
+        set_points = [5, 15, 10]
+        intervals = [500, 500, 500]
+        scheduller = Scheduller(set_points, intervals)
+
+        # TODO encontrar distribuições diferentes de "constant" para esses parâmetros
+        distributions = {
+            # Pacient (not used)
+            "rp": ("constant", {"constant": _rp}),
+            "c": ("constant", {"constant": _c}),
+            "rl": ("constant", {"constant": _rl}),
+
+            # Blower (not used)
+            "tb": ("constant", {"constant": _rp}),
+            "kb": ("constant", {"constant": _kb}),
+
+            # Lung
+            "r_aw": ("constant", {"constant": 3}),
+            # "_r_aw": ("constant", {"constant": 3 / 1000}),
+            "c_rs": ("constant", {"constant": 60}),
+
+            # Ventilator
+            "v_t": ("constant", {"constant": 350}),
+            "peep": ("constant", {"constant": 5}),
+            "rr": ("constant", {"constant": 15}),
+            # "_rr": ("constant", {"constant": 15 / 60}),
+            "t_i": ("constant", {"constant": 1}),
+            "t_ip": ("constant", {"constant": 0.25}),
+            # "t_c": ("constant", {"constant": 1 / (15 / 60)}),
+            # "t_e": ("constant", {"constant": (1 / (15 / 60)) - 1 - 0.25}),
+            # "_f_i": ("constant", {"constant": 350 / 1}),
+
+            # Model constants
+            "f_s": ("constant", {"constant": sample_frequency}),
+            "dt": ("constant", {"constant": dt}),
+        }
         
+        seed = 42
+        ensemble = EnsembleGenerator(distributions, seed)
+        
+        env = gymnasium.make("CpapEnv-V0", 
+                        scheduller             = scheduller,
+                        ensemble_params        = ensemble.generate_sample(),
+                        x_size                 = 3,
+                        x_start_points         = None,
+                        tracked_point          = 'x3',
+                        termination_rule       = TerminationRule.MAX_STEPS,
+                        error_formula          = ErrorFormula.DIFFERENCE,
+                        )
+        env = DictToArrayWrapper(env)
+
+        # Define model symbols
+        s = sp.symbols('s')
+        tb, kb = sp.symbols('tb kb')
+        rp, rl, c = sp.symbols('rp rl c')
+        # kp, ki, kd = sp.symbols('kp ki kd') # Not used
+
+        # Define cpap model
+        blower_model = kb / (s + 1 / tb)
+        blower_model = sp.collect(blower_model, s)
+        patient_model = (rl + rp * rl * c * s) / (1 + (rp+ rl) * c * s)
+        patient_model = sp.collect(patient_model, s)
+        cpap_model = blower_model * patient_model
+        numerators, denominators = sp.fraction(cpap_model)
+        numerators = sp.Poly(numerators, s)
+        denominators = sp.Poly(denominators, s)
+        numerators = numerators.all_coeffs()  # Tranfer function numerator.
+        denominators = denominators.all_coeffs()  # Tranfer function denominator.
+
+        filled_numerators = list()
+        filled_denominators = list()
+        for numerator_coef, denominator_coef in zip(numerators, denominators):
+            filled_numerators.append(numerator_coef.evalf(subs=dict(zip( (c, rp, tb, kb, rl), (_c, _rp, _tb, _kb, _rl) ))))
+            filled_denominators.append(denominator_coef.evalf(subs=dict(zip( (c, rp, tb, kb, rl), (_c, _rp, _tb, _kb, _rl) ))))
+        filled_numerators = np.array(filled_numerators, dtype=np.float64)
+        filled_denominators = np.array(filled_denominators, dtype=np.float64)
+
+        cpap_model = ct.TransferFunction(filled_numerators, filled_denominators)
+
+        # Train the PID controller
+        trained_pid, pid_optimized_params = PIDController.train_pid_controller(
+            cpap_model, 
+            pid_training_method='ZN',
+            pid_type="PI"
+        )
+
+        return env, scheduller, ensemble, trained_pid, pid_optimized_params

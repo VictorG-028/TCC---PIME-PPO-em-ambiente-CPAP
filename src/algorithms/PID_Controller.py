@@ -1,7 +1,9 @@
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 import matplotlib.pyplot as plt
+import control as ct
+from scipy.optimize import minimize
 
 from enums.ErrorFormula import ErrorFormula
 
@@ -60,51 +62,175 @@ class PIDController:
 
         return output
     
-    def tunnig_wiht_Ziegler_Nichols_method(self, Kp_critical: float, L_critical: float):
+
+    @staticmethod
+    def train_pid_with_ZN_method(
+                            plant: ct.TransferFunction, 
+                            pid_type: Literal["P", "PI", "PID"] = "PI",
+                            plot: bool = True,
+                        ) -> tuple[float, float, float]:
         """
-        - [wiki](https://en.wikipedia.org/wiki/Ziegler%E2%80%93Nichols_method)
-        - [tutorial](https://aleksandarhaber.com/model-assisted-ziegler-nichols-pid-control-tuning-method/)
+            Find PID gains using the Ziegler-Nichols reaction curve method.
+        """
+        # step_y is the height of the step over time
+        # plany_y is the height of the output with the respective step_y as input
+        time, plant_y = ct.step_response(plant)
+        step_y = np.ones_like(time)
+        info = ct.step_info(plant)
+
+        # Calculando primeira derivada (dy/dt) e segunda derivada (d²y/dt²)
+        dy_dt = np.gradient(plant_y, time)
+        d2y_dt2 = np.gradient(dy_dt, time)
+
+        # Encontrando o ponto de inflexão (mudança de sinal na segunda derivada)
+        inflexion_idx = np.where(np.diff(np.sign(d2y_dt2)))[0][0]
+        t_inflexion = time[inflexion_idx]    # x
+        y_inflexion = plant_y[inflexion_idx] # y
+        slope = dy_dt[inflexion_idx]         # Derivada no ponto
+
+        # Interseção da tangente com y=0
+        t_intersect_y0 = t_inflexion - y_inflexion / slope
+
+        # Interseção da tangente com y=h (escolha o valor de h)
+        h: float = info["Peak"]  # Valor mais alto
+        t_intersect_yh = t_inflexion + (h - y_inflexion) / slope
+
+        L = t_intersect_y0 
+        T = t_intersect_yh - t_intersect_y0
+
+        if (pid_type == "P"):
+            kp = T / L
+            ki = 0
+            kd = 0
+        elif (pid_type == "PI"):
+            kp = 0.9 * (T / L)
+            ki = L / 0.3
+            kd = 0
+        elif (pid_type == "PID"):
+            kp = 1.2 * (T / L)
+            ki = 2 * L
+            kd = 0.5 * L
+        else:
+            raise ValueError("Invalid PID type. Choose between 'P', 'PI' or 'PID'.")
+
+        if (plot):
+            
+            def tangente(t: float) -> float:
+                """tangente(t) = f(t) = y = f'(t_0) ⋅ (t - t_0) + f(t_0)
+                - t_0 e y_inflexion=f(t_0) são o tempo e valor no ponto de inflexão.
+                - f'(t_0) é o valor da derivada no ponto de inflexão (dy/dt)
+                """
+                return slope * (t - t_inflexion) + y_inflexion
+
+            
+            tangent_x = np.linspace(t_intersect_y0, t_intersect_yh, 1000) # time[-1] = info["PeakTime"]
+            tangent_y = tangente(tangent_x)
+
+            plt.plot(time, step_y, linestyle='--', color='black', label="Step inputs")
+            plt.plot(tangent_x, tangent_y, color='red', linestyle='--', label="Tangent line")
+            plt.plot(time, plant_y, color='blue', label="Plant output")
+            plt.axhline(y=h, color="#b0b0b0", linestyle='-', label=f"High point: h={h:.2f}")
+            plt.axhline(y=0, color="#b0b0b0", linestyle='-')
+
+            # plt.text(L / 2, -0.1, f"T={T:.2f}", color='black', fontsize=8, ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
+            # plt.text(T / 2, -0.1, f"L={L:.2f}", color='black', fontsize=8, ha='center', va='center', bbox=dict(facecolor='white', alpha=0.5))
+            plt.text(L, -0.03, f"L", color='black', fontsize=8, ha='center', va='center')
+            plt.text(T+L, h+0.03, f"T", color='black', fontsize=8, ha='center', va='center')
+            
+            # current_ticks = plt.xticks()[0]
+            # plt.xticks(list(current_ticks) + [L] + [L+T])
+
+            plt.title("Resposta ao Degrau")
+            plt.xlabel("Tempo (s)")
+            plt.ylabel("Saída")
+            plt.legend()
+            plt.grid()
+            plt.show()
+
+            exit()
+
+        # Other ZN method (unused)
+        # kp = 100000
         
-        Perguntas para chat gpt:
-        - Qual o tempo curto suficiente para formar um inpulso / short pulse
-        - Qual o tempo do inpulso, mostra um código python com uma implementação de inpulso
-        Lembrar:
-        - Usar como argumento no paper: o método zieger-nichols gera overshot agressivo  e o PPO atenua esse overshot
-        
-        [en]
-        In Ziegler Wichols method, input = y_target = inpulse /\ or short pulse _|▔|_
-        complete model = plant = complete system = [y_target -> [PID] * [model_transfer_fn] -> y]
-        kp_critical = Kp_ultimate = Kp value such that the system (plant, model, PID * model_transfer_fn) oscillates at a constant amplitude
-        L_critical = period of oscillation when using kp_critical = time between two peaks or two valleys in the output curve when using kp_critical
-        
-        [pt-br]
-        y = y_out = saída da planta = curva com ocilações = curva com picos e vales e 
-        No método de Ziegler Wichols, input =  y_objetivo = inpulso /\ ou pulso curto _|▔|_
-        modelo completo = planta = sistema completo = [y_objetivo -> [PID] * [fn_transferência_do_modelo] -> y]
-        Kp_critical = Kp_ultimate = valor de Kp tal que o modelo completo oscila com amplitude constante
-        L_critical = período de oscilação ao usar Kp_critical = tempo entre dois picos ou dois vales na curva de saída ao usar Kp_critical
+        # untuned_pid = ct.TransferFunction([kp], [1])
+        # closed_loop = ct.feedback(untuned_pid * water_tank_model)
+        # t, y = ct.impulse_response(closed_loop)
+
+        # # Plot da resposta ao degrau
+        # plt.plot(t, y)
+        # plt.title(f"Resposta ao Inpulso {kp=}")
+        # plt.xlabel("Tempo (s)")
+        # plt.ylabel("Saída")
+        # plt.grid()
+        # plt.show()
+
+        return kp, ki, kd
+
+
+    @staticmethod
+    def train_pid_controller(
+                        plant: ct.TransferFunction, 
+                        pid_training_method: str | Literal["ZN"] = 'BFGS', 
+                        pid_type: Literal["P", "PI", "PID"] = "PI",
+                        initial_kp = 0, 
+                        initial_ki = 0, 
+                        initial_kd = 0
+                    ) -> Callable[[float], float]:
+        """
+        Train a PID controller for a given plant using a specified optimization method.
+
+        #### Parameters:
+        plant (Callable[[np.ndarray], np.ndarray]): The plant to be controlled.
+        pid_type (Literal["P", "PI", "PID"]): The type of PID controller to train.
+        pid_training_method (str): The optimization method to use for training the PID controller.
+
+        #### Returns:
+        function: A function that takes an input array and returns the control signal from the trained PID controller.
         """
 
+        if (pid_training_method == "ZN"):
+            optimized_Kp, optimized_Ki, optimized_Kd = PIDController.train_pid_with_ZN_method(plant, pid_type)
+        else:
+            def optimize_pid(params):
+                Kp, Ki, Kd = params
+                pid = ct.TransferFunction([Kp, Ki, Kd], [1, 0.001, 0.001])
+                closed_loop = ct.feedback(pid * plant, 1)
+                t, y = ct.step_response(closed_loop, T=np.linspace(0, 10, 1000))
+                # Objective: minimize the integral of the absolute error
+                error = 1 - y  # assuming unit step input
+                return np.sum(np.abs(error))
+
+            # Perform pid optimization
+            optimized_params = minimize(
+                optimize_pid, 
+                [initial_kp, initial_ki, initial_kd], 
+                method = pid_training_method
+            ) 
+
+            optimized_Kp, optimized_Ki, optimized_Kd = optimized_params.x
         
 
-        self.Kp = 0.6 * Kp_critical 
-        self.Ki = 1.2 * Kp_critical / L_critical
-        self.Kd = 0.075 * Kp_critical * L_critical
+        optimized_pid = ct.TransferFunction(
+            [optimized_Kd, optimized_Kp, optimized_Ki], 
+            [1, 0.001, 0.001]
+        )
+        # print(f"Numerador: {optimized_pid.num}")
+        # print(f"Denominador: {optimized_pid.den}")
+        # print(f"{optimized_pid=}")
+        # print(f"{optimized_pid.damp()=}")
 
+        def pid_controller(error: float) -> float:
+            """
+            Compute the control signal using the trained PID controller.
+            """
+            pid_action = ct.forced_response(
+                optimized_pid, 
+                T = np.array([0, 1e-6]), # 1e-6 para intervalos instantâneos
+                # T = np.array([0, 1]),  # 1 para intervalos longos
+                U = np.array([0, error])
+            )
 
+            return pid_action.y[0, 1]  # Retornar o último valor da resposta
 
-
-"""
-# https://www.google.com/search?q=Ziegler%E2%80%93Nichols+pid+training+python&sca_esv=076c6e27218f3cb7&sxsrf=ADLYWIKsBw1zCoxUFKFnQBUmIDX8b_9ogA%3A1733761502763&ei=3hlXZ6uaLoTb5OUPmfaxkAs&ved=0ahUKEwirgf3zjJuKAxWELbkGHRl7DLIQ4dUDCA8&uact=5&oq=Ziegler%E2%80%93Nichols+pid+training+python&gs_lp=Egxnd3Mtd2l6LXNlcnAiJVppZWdsZXLigJNOaWNob2xzIHBpZCB0cmFpbmluZyBweXRob24yBRAhGKABMgUQIRigAUiKDlDLAVjODHABeAGQAQCYAesBoAHdCaoBBTAuMi40uAEDyAEA-AEBmAIHoALnCcICChAAGLADGNYEGEeYAwCIBgGQBgiSBwUxLjIuNKAH6xE&sclient=gws-wiz-serp
-https://sites.poli.usp.br/d/PME2472/ziegler.pdf
-https://github.com/SzymonK1306/Ziegler-Nichols-tuning-method
-https://jckantor.github.io/CBE30338/04.12-Interactive-PID-Control-Tuning-with-Ziegler--Nichols.html
-https://en.wikipedia.org/wiki/Proportional%E2%80%93integral%E2%80%93derivative_controller
-https://www.youtube.com/watch?v=YYxkS1iFdVk&t=5s
-https://aleksandarhaber.com/model-assisted-ziegler-nichols-pid-control-tuning-method/#google_vignette
-https://python-control.readthedocs.io/en/latest/generated/control.impulse_response.html
-https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/envs/classic_control/pendulum.py
-http://appavl.psxsistemas.com.br:882/pergamumweb/vinculos/000030/000030c7.pdf
-https://sites.poli.usp.br/d/PME2472/ziegler.pdf
-"""
+        return pid_controller, {'optimized_Kp': optimized_Kp, 'optimized_Ki': optimized_Ki, 'optimized_Kd': optimized_Kd}
 
