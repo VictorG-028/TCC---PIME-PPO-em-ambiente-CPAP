@@ -93,6 +93,14 @@ class BaseSetPointEnv(gymnasium.Env):
             should_define_simple_action_and_obs_spaces: bool = False,
             ):
         
+        assert scheduller is not None, """scheduller can't be None. \n\
+            # instantiate scheduler like so: \n\
+            import Scheduller from modules.Scheduller \n\
+            set_points = [3, 6, 9, 4, 2] # [cm] \n\
+            intervals = [400, 400, 400, 400, 400] # [seconds] \n\
+            scheduller = Scheduller(set_points, intervals)
+            """
+        
         if (x_start_points):
             is_correct_size = x_size == len(x_start_points)
         else:
@@ -183,7 +191,7 @@ class BaseSetPointEnv(gymnasium.Env):
         return random_x_vector
 
 
-    def reset(self, seed: Optional[int] = None, options = None) -> tuple[dict[str, Any], dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
         super().reset(seed=seed)
 
         self.set_ensemble_params(options["ensemble_sample_parameters"])
@@ -197,14 +205,15 @@ class BaseSetPointEnv(gymnasium.Env):
                 f"x{i+1}": value for i, value in enumerate(self.x_start_points)
             }
         else:
-            x_values = self. generate_x_vector_randomly() 
+            x_values = self.generate_x_vector_randomly()
 
         self.observation = {
             **x_values,
             "y_ref": self.setpoint,
             "z_t": 0
         }
-        self.reward = self.error_formula(x_values[self.tracked_point], self.setpoint)
+        self.error = self.error_formula(x_values[self.tracked_point], self.setpoint)
+        self.reward = -self.error
         self.done = False
         self.truncated = {}
 
@@ -216,7 +225,7 @@ class BaseSetPointEnv(gymnasium.Env):
     @debug_print_extra_info
     def step(self, action: np.float64):
         set_point: np.float64 = self.scheduller.get_set_point_at(step=self.timestep)
-        print(f"{action=}")
+        # print(f"{action=}")
         # print(f"x_vector={list(self.observation.values())[0:-2]}")
         # print(f"y_ref={list(self.observation.values())[-2]}")
         # print(f"z_t={list(self.observation.values())[-1]}")
@@ -227,8 +236,9 @@ class BaseSetPointEnv(gymnasium.Env):
             **self.ensemble_params
         )
 
-        self.reward = self.error_formula(x_vector[self.tracked_point], set_point)
-        self.cummulative_error += self.reward
+        self.error = self.error_formula(x_vector[self.tracked_point], set_point)
+        self.reward = -self.error
+        self.cummulative_error += self.error
         self.observation = {
             **x_vector,
             "y_ref": set_point,
@@ -239,7 +249,8 @@ class BaseSetPointEnv(gymnasium.Env):
         self.done = self.termination_rule(self.timestep, self.scheduller.intervals_sum, self.max_step)
         print(f"{self.done=} ({self.timestep}/{self.scheduller.intervals_sum})(timestep/scheduller.intervals_sum) ({self.timestep}/{self.max_step})(timestep/max_step)")
 
-        # print(f"RETURNED OBS: {self.observation=}")
+        # print(f"RETURNED OBS: {self.observation=} | Action: {action=} | Reward: {self.reward=}")
+        # input(">>>")
         return self.observation, self.reward, self.done, False, {}
     
 

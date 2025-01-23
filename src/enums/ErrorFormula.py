@@ -4,10 +4,10 @@ import numpy as np
 
 
 def difference(y: np.float64, y_ref: np.float64) -> np.float64:
-    return (y - y_ref)
+    return (y_ref - y)
 
 def difference_squared(y: np.float64, y_ref: np.float64) -> np.float64:
-    return (y - y_ref) * (y - y_ref)
+    return (y_ref - y) * (y_ref - y)
 
 
 class ErrorFormula(Enum):

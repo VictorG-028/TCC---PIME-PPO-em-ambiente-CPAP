@@ -4,6 +4,7 @@ import os
 import re
 import gymnasium
 import numpy as np
+import pandas as pd
 from stable_baselines3 import PPO
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
@@ -176,7 +177,12 @@ class PIME_PPO:
         if pid_controller is not None:
             self.pid_controller = pid_controller
         else:
-            self.pid_controller = PIDController(optimized_Kp, optimized_Ki, optimized_Kd, integrator_bounds, sample_period, env.unwrapped.error_formula) 
+            self.pid_controller = PIDController(optimized_Kp, optimized_Ki, optimized_Kd, 
+                                                integrator_bounds, 
+                                                sample_period, 
+                                                env.unwrapped.error_formula,
+                                                controller_type = "PI"
+                                                ) 
 
         self.env = env
         self.scheduller = scheduller
@@ -185,6 +191,7 @@ class PIME_PPO:
         self.tracked_point_name = tracked_point_name
         self.episodes_per_sample = episodes_per_sample
         self.sample_period = sample_period
+        self.logs_folder_path = logs_folder_path
 
         # flat_obs_space = flatten_observation_space(self.env.observation_space)
         # print(buffer_size)
@@ -193,7 +200,7 @@ class PIME_PPO:
         # print(flat_obs_space, type(flat_obs_space))
         # print("@@@@@@@@@@@@@@@@@@")
 
-        # TODO: esse if engessa o código da classe TerminationRule, pois a cada novo termination_rule é preciso vir aqui atualizar um novo caso. É preciso encotrar uma outra forma de obter steps_per_episode (talvez colocar o input direto no __init__, mas isso permite o step do BaseEnv calcular self.done de forma que gere o erro de falta de memória no buffer ou gere uma situação sem erros, mas que usa mais emmória no buffer do que o necessário. Colocar steps_per_episode como input no __init__ do PIME_PPO.py também deixa o código difícil de usar e o ideal eh não criar dificuldade)
+        # Nota: Ao criar uma nova TerminationRule, é necessário fazer um novo elif que calcula o steps_per_episode em função dessa nova regra.
         if env.unwrapped.max_step is not None:
             self.steps_per_episode = env.unwrapped.max_step
         else:
@@ -242,6 +249,8 @@ class PIME_PPO:
         """
 
         assert steps_to_run > 0, "steps_to_run must be greater than 0."
+
+        records = [] # (*x_vector, y_ref, z_t, action, reward, error, steps_in_episode, is_start_episode)
         
         # steps_extra_info: list[tuple] = []
         steps_in_episode = 0
@@ -262,7 +271,7 @@ class PIME_PPO:
                     done = False # done is updated by termination rule
                     while not done:
 
-                        pi_action = self.pid_controller(self.env.unwrapped.reward)
+                        pi_action = self.pid_controller(self.env.unwrapped.error)
 
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
 
@@ -282,7 +291,8 @@ class PIME_PPO:
 
                         total_steps_counter += 1
                         self.ppo.rollout_buffer.add(obs, action, reward, is_start_episode, value, log_prob)
-                        
+                        records.append((*obs, action, reward, self.env.unwrapped.error, steps_in_episode, is_start_episode))
+
                         obs = next_obs # Can update obs after storing in buffer
                         is_start_episode = False
 
@@ -299,3 +309,13 @@ class PIME_PPO:
         is_same_as_buffer_size = counter_divided_by_iterations == self.buffer_size
         print(f"{self.buffer_size=}")
         print(f"{total_steps_counter=} divided by {iterations=} is equal to {counter_divided_by_iterations} ({is_same_as_buffer_size=})")
+
+        
+        pd.DataFrame(
+            records, 
+            columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
+                    ["y_ref", "z_t", "action", "reward", "error"]
+        ).to_csv(
+            f"{self.logs_folder_path}/records.csv", 
+            index=False
+        )

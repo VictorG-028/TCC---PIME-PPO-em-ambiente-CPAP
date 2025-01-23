@@ -1,6 +1,6 @@
 from algorithms.PID_Controller import PIDController
 from environments.base_set_point_env import BaseSetPointEnv
-from typing import Callable, Dict, Literal, Optional, TypedDict
+from typing import Any, Callable, Dict, Literal, Optional, TypedDict
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
@@ -135,15 +135,52 @@ class CpapEnv(BaseSetPointEnv):
         )
 
         # Pergunta: O GPT-4o gerou números satisfatórios paro low e high do vetor x ?
-
+        
+        # Lembrar: Modificar vetor x aqui implica em modificar o retorno do simulation model e o reset do env
         # Definindo o espaço de observações (flow [l / min], volume [ml], pressure [cmH2O])
         self.observation_space = spaces.Dict({
             "x1": spaces.Box(low=-100, high=100, shape=(1,), dtype=np.float64),  # flow (valores low/high extremo considerando fluxo de ar negativo/positivo durante expiração forçada)
             "x2": spaces.Box(low=0, high=8000, shape=(1,), dtype=np.float64),    # volume (8000 ml é a capacidade pulmonar total máxima para adultos, considerando casos extremos)
             "x3": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),    # pressure (-20 é um valor extremo durante expiração e 60 é um valor extremo durante ventilação mecânica)
+            # "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),  # last pressure
+            # "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de inspiração
+            # "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de expiração
+            # "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa
+            # "x8": self.action_space,                                           # last action taken
             "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),   # set point pressure (60 é valor extremo durante ventilação mecânica)
             "z_t": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float64)  # Acumulador de erro
         })
+
+    
+    # Wrapper x_vector inicialization to apply a especial rule to this environment
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
+        obs, _ = super().reset(seed, options)
+
+        is_positive = obs["x1"] > 0
+        is_negative = obs["x1"] < 0
+        is_zero = obs["x1"] == 0
+
+        obs["x4"] = 0 # Consider last pressure as 0
+        obs["x5"] = int(is_positive)
+        obs["x6"] = int(is_negative)
+        obs["x7"] = int(is_zero)
+        obs["x8"] = 0 # Consider last action as no volt applyed
+
+        map_x1_to_phase = {
+            (True, False, False): "inhale",
+            (False, True, False): "exhale",
+            (False, False, True): "pause"
+        }
+
+        # Reset accordinly to x vector Internal state of simulation model
+        self.i = 0
+        self.phase_counter = 1
+        self.phase = map_x1_to_phase[(is_positive, is_negative, is_zero)]
+        self.start_phase_time = 0
+
+        print(map_x1_to_phase[(is_positive, is_negative, is_zero)])
+
+        return obs, _
 
     
     def simulation_model(self,
@@ -216,14 +253,16 @@ class CpapEnv(BaseSetPointEnv):
 
         self.i += 1
 
+        # Lembrar: Modificar vetor x aqui implica em modificar o observation space no __init__ e o reset desse env
         return {
-            "x1": current_flow,    # Fluxo de ar atual
-            "x2": current_volume,  # Volume de ar atual
-            "x3": current_pressure,# Pressão de ar atual
-            # "x4": last_pressure,   # Pressão anterior a atual
-            # "x5": self.phase == 'inhale',  # Flag de inspiração
-            # "x6": self.phase == 'exhale',  # Flag de expiração
-            # "x7": self.phase == 'pause'    # Flag de pausa
+            "x1": current_flow,                   # Fluxo de ar atual
+            "x2": current_volume,                 # Volume de ar atual
+            "x3": current_pressure,               # Pressão de ar atual
+            # "x4": last_pressure,                # Pressão anterior a atual
+            # "x5": int(self.phase == 'inhale'),  # Flag de inspiração
+            # "x6": int(self.phase == 'exhale'),  # Flag de expiração
+            # "x7": int(self.phase == 'pause'),   # Flag de pausa
+            # "x8": u_t,                          # last action taken
         }
     
 

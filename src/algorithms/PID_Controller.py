@@ -33,7 +33,7 @@ class PIDController:
             integrator_bounds: list[int, int],
             dt = 1,
             error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE, 
-            use_derivative: bool = False
+            controller_type: Literal["PID", "PI", "P"] = "PI",
         ) -> None:
         self.Kp = Kp
         self.Ki = Ki
@@ -46,15 +46,25 @@ class PIDController:
         self.integral = 0 # precisa ser guardado no self para ir acumulando a cada chamada de controle do pid
 
         def _PID_formula(error):
-            self.integral += np.clip(error * self.dt, self.min, self.max)
+            self.integral += error * self.dt
+            self.integral = np.clip(self.integral, self.min, self.max)
             derivative = (error - self.previous_error) / self.dt
             self.Kp * error + self.Ki * self.integral + self.Kd * derivative
 
         def _PI_formula(error):
-            self.integral += np.clip(error * self.dt, self.min, self.max)
+            self.integral += error * self.dt
+            self.integral = np.clip(self.integral, self.min, self.max)
             return self.Kp * error + self.Ki * self.integral
         
-        self.formula = _PID_formula if use_derivative else _PI_formula
+        def _P_formula(error):
+            return self.Kp * error
+        
+        map_type_to_formula = {
+            "PID": _PID_formula,
+            "PI": _PI_formula,
+            "P": _P_formula
+        }
+        self.formula = map_type_to_formula[controller_type]
 
     def __call__(self, error: float) -> float:
         output = self.formula(error)
@@ -67,7 +77,7 @@ class PIDController:
     def train_pid_with_ZN_method(
                             plant: ct.TransferFunction, 
                             pid_type: Literal["P", "PI", "PID"] = "PI",
-                            plot: bool = True,
+                            plot: bool = False,
                         ) -> tuple[float, float, float]:
         """
             Find PID gains using the Ziegler-Nichols reaction curve method.
@@ -84,6 +94,7 @@ class PIDController:
 
         # Encontrando o ponto de inflexão (mudança de sinal na segunda derivada)
         inflexion_idx = np.where(np.diff(np.sign(d2y_dt2)))[0][0]
+        # inflexion_idx = 15
         t_inflexion = time[inflexion_idx]    # x
         y_inflexion = plant_y[inflexion_idx] # y
         slope = dy_dt[inflexion_idx]         # Derivada no ponto

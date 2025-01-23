@@ -1,3 +1,4 @@
+from typing import Any, Optional
 import gymnasium
 from gymnasium import spaces
 import numpy as np
@@ -30,6 +31,23 @@ class DictToArrayWrapper(gymnasium.ObservationWrapper):
         # print(list(observation.values()))
         # print(np.array(list(observation.values()), dtype=np.float32))
         # self.counter += 1
+        # input(">>>")
         # print("@@@@@@@@@@@@@@@@")
         obs_array = np.array(list(observation.values()), dtype=np.float32)
+
         return obs_array
+    
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[np.ndarray, dict]:
+        obs, _ = self.env.reset(seed=seed, options=options)
+        obs: dict[str, np.float64]
+
+        array_obs = np.array(list(obs.values()), dtype=np.float64)
+        # print(f"{obs=}")
+        # print(list(obs.values()))
+        # print(array_obs)
+        # print(array_obs.shape)
+        # print(array_obs.reshape((-1,)))
+        # print(array_obs.shape)
+        # input(">3>")
+        
+        return array_obs, _
