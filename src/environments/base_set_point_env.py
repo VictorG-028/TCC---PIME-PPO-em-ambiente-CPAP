@@ -1,5 +1,6 @@
 # from __future__ import annotations
-from typing import Any, Callable, Dict, Literal, Optional
+from typing import Any, Callable, Literal, Optional
+from enums.RewardFormula import RewardFormula, reward_functions
 from enums.ErrorFormula import ErrorFormula, error_functions
 from enums.TerminationRule import TerminationRule, termination_functions
 from modules.Scheduller import Scheduller
@@ -83,14 +84,16 @@ class BaseSetPointEnv(gymnasium.Env):
             scheduller: Scheduller,
             start_ensemble_params: dict[str, np.float64],
             termination_rule: TerminationRule | Callable = TerminationRule.INTERVALS,
-            error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE_SQUARED,
+            error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE,
+            reward_formula: RewardFormula | Callable = RewardFormula.DIFFERENCE_SQUARED,
             action_size: int = 1,
             x_size: int = 1,
             x_start_points: Optional[list[np.float64]] = None,
             tracked_point: str = 'x1',
             max_step: Optional[int] = None,
-            render_mode: Literal["terminal"] = "terminal",
             should_define_simple_action_and_obs_spaces: bool = False,
+            integrator_clip_bounds: Optional[tuple[float, float]] = (-25, 25),
+            render_mode: Literal["terminal"] = "terminal",
             ):
         
         assert scheduller is not None, """scheduller can't be None. \n\
@@ -127,6 +130,13 @@ class BaseSetPointEnv(gymnasium.Env):
         self.max_step          = max_step
         self.render_mode       = render_mode
 
+        if (integrator_clip_bounds is None):
+            self.next_cummulative_error = lambda error: self.cummulative_error + error
+            # self.integrator_clip_min, self.integrator_clip_max = [-float('inf'), float('inf')]
+        else:
+            self.next_cummulative_error = lambda error: np.clip(self.cummulative_error + error, integrator_clip_bounds[0], integrator_clip_bounds[1])
+            # self.integrator_clip_min, self.integrator_clip_max = integrator_clip_bounds
+
         self.cummulative_error: float = 0
         self.timestep: int            = 0
         self.setpoint: float          = self.scheduller.get_set_point_at(step=0)
@@ -134,16 +144,23 @@ class BaseSetPointEnv(gymnasium.Env):
         # print(f"[set_point_env.__init__()] var {termination_rule} of type {type(termination_rule)}")
         # print(f"[set_point_env.__init__()] var {error_formula} of type {type(error_formula)}")
 
+        # Load each function from the enum if it's an enum, otherwise, use the function itself
         # TODO use "import signarute from inspect" to check if termination_rule and error_formula have right signarute
         if callable(termination_rule):
             self.termination_rule = termination_rule
         elif isinstance(termination_rule, TerminationRule):
             self.termination_rule = termination_functions[termination_rule]
+        
         if callable(error_formula):
             self.error_formula    = error_formula
         elif isinstance(error_formula, ErrorFormula):
             self.error_formula    = error_functions[error_formula]
-
+        
+        if callable(reward_formula):
+            self.reward_formula = reward_formula
+        elif isinstance(reward_formula, RewardFormula):
+            self.reward_formula = reward_functions[reward_formula]
+        ##############################################################
         
         assert x_size > 0, \
             "Size of x vector is invalid. The vector should be an array with lenght x_size (positive integer)."
@@ -154,20 +171,20 @@ class BaseSetPointEnv(gymnasium.Env):
         # Can define a simple case if needed.
         if (should_define_simple_action_and_obs_spaces):
             self.action_space = spaces.Box(
-                low=-np.inf, 
-                high=np.inf, 
+                low=-float('inf'), 
+                high=float('inf'), 
                 shape=(action_size,), 
                 dtype=np.float64
             )
             named_spaces = {
-                f"x{i+1}": spaces.Box(low=-np.inf, high=np.inf, shape=(1,), dtype=np.float64) 
+                f"x{i+1}": spaces.Box(low=-float('inf'), high=float('inf'), shape=(1,), dtype=np.float64) 
                 for i in range(self.x_size)
             }
             self.observation_space = spaces.Dict(
                 {
                     **named_spaces,
-                    "y_ref": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64),
-                    "z_t": spaces.Box(-np.inf, np.inf, shape=(1,), dtype=np.float64),
+                    "y_ref": spaces.Box(-float('inf'), float('inf'), shape=(1,), dtype=np.float64),
+                    "z_t": spaces.Box(-float('inf'), float('inf'), shape=(1,), dtype=np.float64),
                 }
             )
 
@@ -236,9 +253,10 @@ class BaseSetPointEnv(gymnasium.Env):
             **self.ensemble_params
         )
 
-        self.error = self.error_formula(x_vector[self.tracked_point], set_point)
-        self.reward = -self.error
-        self.cummulative_error += self.error
+        # NOTE: self.error is passed to PID with env.unwrapped.error
+        self.error = self.error_formula(y_ref=set_point, y=x_vector[self.tracked_point])
+        self.reward = self.reward_formula(y_ref=set_point, y=x_vector[self.tracked_point])
+        self.cummulative_error = self.next_cummulative_error(self.error)
         self.observation = {
             **x_vector,
             "y_ref": set_point,

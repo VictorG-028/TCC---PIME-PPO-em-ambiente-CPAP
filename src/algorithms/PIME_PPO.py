@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 import math
 import os
 import re
@@ -145,7 +145,7 @@ class PIME_PPO:
     def __init__(self, 
                  env: gymnasium.Env,                                        # gymnasium.Env like set point env
                  scheduller: Scheduller,                                    # manage the set_point at each step
-                 ensemble_generator: EnsembleGenerator,                              # manage the random inicialization of parameters
+                 ensemble_generator: EnsembleGenerator,                     # manage the random inicialization of parameters
                  ensemble_size: int = 2,                                    # number of models in ensemble
                  pid_controller: Optional[Callable[[float], float]] = None, # Tuned pid encapsulated inside a function
                  optimized_Kp: np.float64 = 1,                              # 
@@ -156,14 +156,18 @@ class PIME_PPO:
                  logs_folder_path: str = "logs/ppo/",                       # PPO logs
                  buffer_size: Optional[int] = None,                         # buffer_size = ensemble_size * episode_lenght (minimum size needed to not get buffer overflow error)
                  episodes_per_sample: int = 5,                              # Number of episodes collected for one parameter set
+                 gamma = 0.99,                                              # PPO param - Discount factor
+                 clip_range: float = 0.2,                                   # PPO param
                  gae_lambda: float = 0.97,                                  # PPO param
-                 c1: float = 1.0,                                           # not used
-                 c2: float = 0.02,                                          # PPO param
-                 integrator_bounds: list[int, int] = [-25, 25],             # Clip para pid (formula do integrator)
-                 sample_period: int = 1                                     # Euler method sampling period (dt)
+                 vf_coef: float = 1.0,                                      # PPO param c1 = vf_coef
+                 ent_coef: float = 0.02,                                    # PPO param c2 = ent_coef
+                 integrator_bounds: tuple[int, int] = (-25, 25),            # Clip para PID e PPO (formula do integrator)
+                 pid_type: Literal["PID", "PI", "P"] = "PI",                # PID, PI or P
+                 sample_period: int = 1,                                    # Euler method sampling period (dt)
+                 seed: Optional[int] = None,                                # Seed for reproducibility
                  ) -> None:
         """
-        #### Observações importantes:
+        #### NOTE:
         buffer size depende do tamanho do episódio e do tamanho do ensemble. 
         O tamanho do episódio depende da termination rule. 
         O tamanho do ensemble é definido pelo usuário.
@@ -181,7 +185,7 @@ class PIME_PPO:
                                                 integrator_bounds, 
                                                 sample_period, 
                                                 env.unwrapped.error_formula,
-                                                controller_type = "PI"
+                                                controller_type = pid_type
                                                 ) 
 
         self.env = env
@@ -222,14 +226,17 @@ class PIME_PPO:
         self.ppo = PPO(CustomActorCriticPolicy, 
                        env, 
                        verbose               = verbose,              #
-                       ent_coef              = c2,                   # 1.0
-                       vf_coef               = c1,                   # 0.02
+                       gamma                 = gamma,                # Discount factor
                        gae_lambda            = gae_lambda,           # Factor for trade-off of bias vs variance for Generalized Advantage Estimator. Equivalent to classic advantage when set to 1.
-                       gamma                 = 0.99,                 # Discount factor
+                       clip_range            = clip_range,           #
+                       clip_range_vf         = None,                 # No clip applyed to vf
+                       vf_coef               = vf_coef,              # 0.02
+                       ent_coef              = ent_coef,             # 1.0
                        rollout_buffer_class  = RolloutBuffer,        #
+                       seed                  = seed,                 #
                        # rollout_buffer_kwargs = {'buffer_size': buffer_size},
                        # buffer_size           = buffer_size,
-                       n_steps               = self.buffer_size
+                       n_steps               = self.buffer_size,
                        )
         
         # Setup logger (mandatory to avoid "AttributeError: 'PPO' object has no attribute '_logger'.")
@@ -314,7 +321,7 @@ class PIME_PPO:
         pd.DataFrame(
             records, 
             columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                    ["y_ref", "z_t", "action", "reward", "error"]
+                    ["y_ref", "z_t", "action", "reward", "error", "steps_in_episode", "is_start_episode"]
         ).to_csv(
             f"{self.logs_folder_path}/records.csv", 
             index=False

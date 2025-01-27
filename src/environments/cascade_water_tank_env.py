@@ -1,4 +1,5 @@
 from algorithms.PID_Controller import PIDController
+from enums.RewardFormula import RewardFormula
 from environments.base_set_point_env import BaseSetPointEnv
 from typing import Any, Callable, Literal, Optional
 from enums.ErrorFormula import ErrorFormula, error_functions
@@ -32,12 +33,15 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
             scheduller: Scheduller,
             ensemble_params: dict[str, np.float64],
             termination_rule: TerminationRule | Callable = TerminationRule.INTERVALS,
-            error_formula: ErrorFormula | Callable = ErrorFormula.DIFFERENCE_SQUARED,
+            error_formula: ErrorFormula | Callable = ErrorFormula.DIFFERENCE,
+            reward_formula: RewardFormula | Callable = RewardFormula.DIFFERENCE_SQUARED,
             action_size: int = 1,
             x_size: int = 2,
             x_start_points: Optional[list[np.float64]] = None,
             tracked_point: str = 'x2',
+            integrator_clip_bounds: Optional[tuple[float, float]] = (-25, 25),
             render_mode: Literal["terminal"] = "terminal",
+
 
             # Created parameters
             observation_max_boundaries: list[float] = [10, 10],
@@ -64,10 +68,12 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
             start_ensemble_params=ensemble_params,
             termination_rule=termination_rule,
             error_formula=error_formula,
+            reward_formula=reward_formula,
             action_size=1,
             x_size=x_size,
             x_start_points=x_start_points,
             tracked_point=tracked_point,
+            integrator_clip_bounds=integrator_clip_bounds,
             render_mode=render_mode,
         )
         
@@ -96,7 +102,7 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         self.observation_space = spaces.Dict({
             **x_vector,
             "y_ref": spaces.Box(low=0, high=observation_max_boundaries[1], shape=(1,), dtype=np.float64),
-            "z_t": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float64)
+            "z_t": spaces.Box(low=0, high=float('inf'), shape=(1,), dtype=np.float64)
         })
 
 
@@ -149,7 +155,18 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
     
 
     @staticmethod
-    def create_water_tank_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
+    def create_water_tank_environment(seed = 42,
+                                      set_points: list[float] = [3, 6, 9, 4, 2],
+                                      intervals: list[float] = [400, 400, 400, 400, 400],
+                                      distributions: dict[str, tuple[str, dict[str, float]]] = {
+                                        "g": ("constant", {"constant": 981}),                # g (gravity) [cm/s²]
+                                        "p1": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p1
+                                        "p2": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p2
+                                        "p3": ("uniform", {"low": 0.07, "high": 0.17}),      # p3
+                                        "dt": ("constant", {"constant": 1}),                 # dt sample time [s]
+                                      },
+                                      integrator_bounds: tuple[float, float] = (-25, 25),
+                                      ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
 
         s
@@ -175,17 +192,7 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
             p3 = Kpump / A1, onde Kpump [m³/s⋅V] é a constante da bomba e A1 [m²] é a área do tanque superior.
         """
         
-        set_points = [3, 6, 9, 4, 2] # [cm]
-        intervals = [400, 400, 400, 400, 400] # [s]
         scheduller = Scheduller(set_points, intervals) 
-        distributions = {
-            "g": ("constant", {"constant": 981}),                # g (gravity) [cm/s²]
-            "p1": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p1
-            "p2": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p2
-            "p3": ("uniform", {"low": 0.07, "high": 0.17}),      # p3
-            "dt": ("constant", {"constant": 2}),                 # dt sample time [s]
-        }
-        seed = 42
         ensemble = EnsembleGenerator(distributions, seed)
 
         env = gymnasium.make("CascadeWaterTankEnv-V0", 
@@ -193,14 +200,14 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
                         ensemble_params        = ensemble.generate_sample(), 
                         termination_rule       = TerminationRule.INTERVALS,
                         error_formula          = ErrorFormula.DIFFERENCE,
+                        reward_formula         = RewardFormula.DIFFERENCE_SQUARED,
                         action_size            = 1,
                         x_size                 = 2,
                         x_start_points         = None, #  [0, 0],
-                        tracked_point          = 'x2'
+                        tracked_point          = 'x2',
+                        integrator_clip_bounds = integrator_bounds
                         )
         env = DictToArrayWrapper(env)
-        
-        scheduller = Scheduller(set_points, intervals) 
         
         # Define model symbols
         t = sp.symbols('t', real=True, positive=True)

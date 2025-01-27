@@ -17,8 +17,8 @@ class DictToArrayWrapper(gymnasium.ObservationWrapper):
         super(DictToArrayWrapper, self).__init__(env)
 
         self.observation_space = spaces.Box(
-            low=-np.inf, 
-            high=np.inf, 
+            low=-float('inf'), 
+            high=float('inf'), 
             shape=(len(env.observation_space.spaces),), 
             dtype=np.float32
         )

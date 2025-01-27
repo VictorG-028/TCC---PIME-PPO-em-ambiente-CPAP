@@ -181,7 +181,7 @@ class PIDController:
     @staticmethod
     def train_pid_controller(
                         plant: ct.TransferFunction, 
-                        pid_training_method: str | Literal["ZN"] = 'BFGS', 
+                        pid_training_method: str | Literal["ZN", "BFGS"] = "BFGS", 
                         pid_type: Literal["P", "PI", "PID"] = "PI",
                         initial_kp = 0, 
                         initial_ki = 0, 

@@ -66,7 +66,7 @@ class PhControl(BaseSetPointEnv):
             "x1": spaces.Box(low=0, high=14, shape=(1,), dtype=np.float64), # ph
             "x2": spaces.Box(low=0, high=1000, shape=(1,), dtype=np.float64), # conc
             "y_ref": spaces.Box(low=0, high=14, shape=(1,), dtype=np.float64),
-            "z_t": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float64)
+            "z_t": spaces.Box(low=0, high=float('inf'), shape=(1,), dtype=np.float64)
         })
 
 

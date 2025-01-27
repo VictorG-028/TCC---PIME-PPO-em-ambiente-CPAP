@@ -1,8 +1,9 @@
 from algorithms.PID_Controller import PIDController
+from enums.RewardFormula import RewardFormula
 from environments.base_set_point_env import BaseSetPointEnv
-from typing import Any, Callable, Dict, Literal, Optional, TypedDict
-from enums.ErrorFormula import ErrorFormula, error_functions
-from enums.TerminationRule import TerminationRule, termination_functions
+from typing import Any, Callable, Literal, Optional, TypedDict
+from enums.ErrorFormula import ErrorFormula
+from enums.TerminationRule import TerminationRule
 from modules.Scheduller import Scheduller
 from modules.EnsembleGenerator import EnsembleGenerator
 from wrappers.DictToArray import DictToArrayWrapper
@@ -90,9 +91,11 @@ class CpapEnv(BaseSetPointEnv):
             x_size: int = 2,
             x_start_points: Optional[list[np.float64]] = None,
             termination_rule: TerminationRule | Callable = TerminationRule.MAX_STEPS,
-            error_formula: ErrorFormula | Callable = ErrorFormula.DIFFERENCE_SQUARED,
+            error_formula: ErrorFormula | Callable = ErrorFormula.DIFFERENCE,
+            reward_formula: RewardFormula | Callable = RewardFormula.DIFFERENCE_SQUARED,
             start_points: Optional[list[np.float64]] = None,
             tracked_point: str = 'x3',
+            integrator_clip_bounds: Optional[tuple[float, float]] = (-25, 25),
             render_mode: Literal["terminal"] = "terminal",
 
             # Created parameters
@@ -119,11 +122,13 @@ class CpapEnv(BaseSetPointEnv):
             start_ensemble_params=ensemble_params,
             termination_rule=termination_rule,
             error_formula=error_formula,
+            reward_formula=reward_formula,
             action_size=1,
             x_size=x_size,
             x_start_points=start_points,
             tracked_point=tracked_point,
             max_step=max_step,
+            integrator_clip_bounds=integrator_clip_bounds,
             render_mode=render_mode,
         )
 
@@ -148,7 +153,7 @@ class CpapEnv(BaseSetPointEnv):
             # "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa
             # "x8": self.action_space,                                           # last action taken
             "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),   # set point pressure (60 é valor extremo durante ventilação mecânica)
-            "z_t": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float64)  # Acumulador de erro
+            "z_t": spaces.Box(low=0, high=float('inf'), shape=(1,), dtype=np.float64)  # Acumulador de erro
         })
 
     
@@ -160,11 +165,11 @@ class CpapEnv(BaseSetPointEnv):
         is_negative = obs["x1"] < 0
         is_zero = obs["x1"] == 0
 
-        obs["x4"] = 0 # Consider last pressure as 0
-        obs["x5"] = int(is_positive)
-        obs["x6"] = int(is_negative)
-        obs["x7"] = int(is_zero)
-        obs["x8"] = 0 # Consider last action as no volt applyed
+        # obs["x4"] = 0 # Consider last pressure as 0
+        # obs["x5"] = int(is_positive)
+        # obs["x6"] = int(is_negative)
+        # obs["x7"] = int(is_zero)
+        # obs["x8"] = 0 # Consider last action as no volt applyed
 
         map_x1_to_phase = {
             (True, False, False): "inhale",
@@ -177,8 +182,6 @@ class CpapEnv(BaseSetPointEnv):
         self.phase_counter = 1
         self.phase = map_x1_to_phase[(is_positive, is_negative, is_zero)]
         self.start_phase_time = 0
-
-        print(map_x1_to_phase[(is_positive, is_negative, is_zero)])
 
         return obs, _
 
@@ -274,7 +277,12 @@ class CpapEnv(BaseSetPointEnv):
     
 
     @staticmethod
-    def create_cpap_environment() -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
+    def create_cpap_environment(seed = 42,
+                                set_points: list[float] =  [5, 15, 10],
+                                intervals: list[float] = [500, 500, 500],
+                                distributions: dict[str, tuple[str, dict[str, float]]] = None,
+                                integrator_bounds: tuple[float, float] = (-25, 25),
+                                ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
 
         s
@@ -321,6 +329,28 @@ class CpapEnv(BaseSetPointEnv):
             O ganho derivativo ajusta a contribuição proporcional à taxa de variação do erro. 
         """
 
+        scheduller = Scheduller(set_points, intervals)
+        ensemble = EnsembleGenerator(distributions, seed)
+        
+        env = gymnasium.make("CpapEnv-V0", 
+                        scheduller             = scheduller,
+                        ensemble_params        = ensemble.generate_sample(),
+                        x_size                 = 3,
+                        x_start_points         = None,
+                        tracked_point          = 'x3',
+                        termination_rule       = TerminationRule.MAX_STEPS,
+                        error_formula          = ErrorFormula.DIFFERENCE,
+                        reward_formula         = RewardFormula.DIFFERENCE_SQUARED,
+                        integrator_clip_bounds = integrator_bounds,
+                        )
+        env = DictToArrayWrapper(env)
+
+        # Define model symbols
+        s = sp.symbols('s')
+        tb, kb = sp.symbols('tb kb')
+        rp, rl, c = sp.symbols('rp rl c')
+        # kp, ki, kd = sp.symbols('kp ki kd') # Not used
+
         # Define model values
         patient = {
             # hh: Heated Humidifier.
@@ -336,68 +366,9 @@ class CpapEnv(BaseSetPointEnv):
             'Heat Moisture Exchange, moderate ARDS': {'rp': 15e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
             'Heat Moisture Exchange, severe ARDS':   {'rp': 15e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
         }
-        _rp, _c, _rl = patient['Heated Humidifier, Normal'].values()
+        _rp, _c, _rl =  10e-3, 50, 48.5 * 60 / 1000
         _tb = 10e-3
         _kb = 0.5
-
-        sample_frequency = 30     # [Hz]
-        dt = 1 / sample_frequency # [s]
-
-        set_points = [5, 15, 10]
-        intervals = [500, 500, 500]
-        scheduller = Scheduller(set_points, intervals)
-
-        # TODO encontrar distribuições diferentes de "constant" para esses parâmetros
-        distributions = {
-            # Pacient (not used)
-            "rp": ("constant", {"constant": _rp}),
-            "c": ("constant", {"constant": _c}),
-            "rl": ("constant", {"constant": _rl}),
-
-            # Blower (not used)
-            "tb": ("constant", {"constant": _rp}),
-            "kb": ("constant", {"constant": _kb}),
-
-            # Lung
-            "r_aw": ("constant", {"constant": 3}),
-            # "_r_aw": ("constant", {"constant": 3 / 1000}),
-            "c_rs": ("constant", {"constant": 60}),
-
-            # Ventilator
-            "v_t": ("constant", {"constant": 350}),
-            "peep": ("constant", {"constant": 5}),
-            "rr": ("constant", {"constant": 15}),
-            # "_rr": ("constant", {"constant": 15 / 60}),
-            "t_i": ("constant", {"constant": 1}),
-            "t_ip": ("constant", {"constant": 0.25}),
-            # "t_c": ("constant", {"constant": 1 / (15 / 60)}),
-            # "t_e": ("constant", {"constant": (1 / (15 / 60)) - 1 - 0.25}),
-            # "_f_i": ("constant", {"constant": 350 / 1}),
-
-            # Model constants
-            "f_s": ("constant", {"constant": sample_frequency}),
-            "dt": ("constant", {"constant": dt}),
-        }
-        
-        seed = 42
-        ensemble = EnsembleGenerator(distributions, seed)
-        
-        env = gymnasium.make("CpapEnv-V0", 
-                        scheduller             = scheduller,
-                        ensemble_params        = ensemble.generate_sample(),
-                        x_size                 = 3,
-                        x_start_points         = None,
-                        tracked_point          = 'x3',
-                        termination_rule       = TerminationRule.MAX_STEPS,
-                        error_formula          = ErrorFormula.DIFFERENCE,
-                        )
-        env = DictToArrayWrapper(env)
-
-        # Define model symbols
-        s = sp.symbols('s')
-        tb, kb = sp.symbols('tb kb')
-        rp, rl, c = sp.symbols('rp rl c')
-        # kp, ki, kd = sp.symbols('kp ki kd') # Not used
 
         # Define cpap model
         blower_model = kb / (s + 1 / tb)
@@ -424,7 +395,7 @@ class CpapEnv(BaseSetPointEnv):
         # Train the PID controller
         trained_pid, pid_optimized_params = PIDController.train_pid_controller(
             cpap_model, 
-            pid_training_method='ZN',
+            pid_training_method='BFGS',
             pid_type="PI"
         )
 
