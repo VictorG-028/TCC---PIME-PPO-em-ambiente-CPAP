@@ -44,7 +44,8 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
 
 
             # Created parameters
-            observation_max_boundaries: list[float] = [10, 10],
+            action_bounds: tuple[float, float] = (0, 1),            #[V]
+            observation_max_bounds: tuple[float, float] = [10, 10], # [cm]
             ):
         
         # TODO criar wrapper que verifica se esse ambiente foi criado corretamente
@@ -56,7 +57,7 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
 
         assert x_start_points is None or x_size == len(x_start_points), \
             "Lenght of start_points must be equal to x_size."
-        assert x_size == len(observation_max_boundaries), \
+        assert x_size == len(observation_max_bounds), \
             "Lenght of observation_max_boundaries must be equal to x_size."
         assert action_size == 1, \
             "action_size must be equal to 1."
@@ -79,8 +80,8 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         
         # Definindo o espaço de ações (u_t)
         self.action_space = spaces.Box(
-            low= 0, 
-            high= 10, 
+            low=action_bounds[0], 
+            high=action_bounds[1], 
             shape=(action_size,), 
             dtype=np.float64
         )
@@ -88,12 +89,12 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         # Explicit show the default case
         if (x_size == 2): # Default case
             x_vector = {
-                "x1": spaces.Box(low=0, high=observation_max_boundaries[0], shape=(1,), dtype=np.float64), # Nível da água do primeiro tanque
-                "x2": spaces.Box(low=0, high=observation_max_boundaries[1], shape=(1,), dtype=np.float64), # Nível da água do segundo tanque
+                "x1": spaces.Box(low=0, high=observation_max_bounds[0], shape=(1,), dtype=np.float64), # Nível da água do primeiro tanque
+                "x2": spaces.Box(low=0, high=observation_max_bounds[1], shape=(1,), dtype=np.float64), # Nível da água do segundo tanque
             }
         else: # General case
             x_vector = {
-                f"x{i+1}": spaces.Box(low=0, high=observation_max_boundaries[i], shape=(1,), dtype=np.float64) 
+                f"x{i+1}": spaces.Box(low=0, high=observation_max_bounds[i], shape=(1,), dtype=np.float64) 
                 for i in range(x_size)
             }
         # x_vector[f"x{x_size+1}"] = self.action_space # Last action
@@ -101,7 +102,7 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         # Definindo o espaço de observações (l1_t e l2_t)
         self.observation_space = spaces.Dict({
             **x_vector,
-            "y_ref": spaces.Box(low=0, high=observation_max_boundaries[1], shape=(1,), dtype=np.float64),
+            "y_ref": spaces.Box(low=0, high=observation_max_bounds[1], shape=(1,), dtype=np.float64),
             "z_t": spaces.Box(low=0, high=float('inf'), shape=(1,), dtype=np.float64)
         })
 
@@ -166,6 +167,8 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
                                         "dt": ("constant", {"constant": 1}),                 # dt sample time [s]
                                       },
                                       integrator_bounds: tuple[float, float] = (-25, 25),
+                                      action_bounds: tuple[float, float] = (0, 1),
+                                      observation_max_bounds: tuple[float, float] = (10, 10),
                                       ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
 
@@ -205,7 +208,9 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
                         x_size                 = 2,
                         x_start_points         = None, #  [0, 0],
                         tracked_point          = 'x2',
-                        integrator_clip_bounds = integrator_bounds
+                        integrator_clip_bounds = integrator_bounds,
+                        action_bounds          = action_bounds,
+                        observation_max_bounds = observation_max_bounds,
                         )
         env = DictToArrayWrapper(env)
         

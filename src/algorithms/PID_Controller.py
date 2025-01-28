@@ -201,6 +201,7 @@ class PIDController:
 
         if (pid_training_method == "ZN"):
             optimized_Kp, optimized_Ki, optimized_Kd = PIDController.train_pid_with_ZN_method(plant, pid_type)
+            print(f"ZN results -> {optimized_Kp=}, {optimized_Ki=}, {optimized_Kd=}")
         else:
             def optimize_pid(params):
                 Kp, Ki, Kd = params

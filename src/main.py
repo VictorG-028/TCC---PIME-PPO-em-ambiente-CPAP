@@ -1,13 +1,19 @@
+from datetime import datetime
+import locale
+
 from algorithms.PIME_PPO import PIME_PPO
 from environments.CPAP_env import CpapEnv
 from environments.cascade_water_tank_env import CascadeWaterTankEnv
 from environments.ph_control_env import PhControl
+from modules.SaveFiles import save_hyperparameters_as_json
 
+locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+current_date_time = datetime.now().strftime("%d-%m-%H%M") # day-month-hourminute
 
 experiments = {
     'double_water_tank': {
         'create_env_function': CascadeWaterTankEnv.create_water_tank_environment,
-        'logs_folder_path': "logs/ppo/double_water_tank",
+        'logs_folder_path': f"logs/ppo/double_water_tank/{current_date_time}",
 
         "hyperparameters": {
             "seed": 42,
@@ -25,6 +31,8 @@ experiments = {
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
+                "action_bounds": (0, 1),            # [V]
+                "observation_max_bounds": (10, 10), # [cm]
                 "PID_type": "PI",
             },
             ## Scheduller
@@ -43,12 +51,12 @@ experiments = {
     },
     'ph_control': {
         'create_env_function': PhControl.create_ph_control_environment,
-        'logs_folder_path': "logs/ppo/ph_control",
+        'logs_folder_path': f"logs/ppo/ph_control/{current_date_time}",
         'tracked_point': 'x2',
     },
     'CPAP': {
         'create_env_function': CpapEnv.create_cpap_environment,
-        'logs_folder_path': "logs/ppo/CPAP",
+        'logs_folder_path': f"logs/ppo/CPAP/{current_date_time}",
 
         "hyperparameters": {
             "seed": 42,
@@ -66,6 +74,7 @@ experiments = {
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
+                "action_bounds": (0, 100),        # [cmH2O]
                 "PID_type": "PI",
             },
             ## Scheduller
@@ -117,14 +126,20 @@ env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_functi
     hyperparameters["distributions"],
     hyperparameters["PID_and_Env"]["integrator_bounds"],
 )
-
+save_hyperparameters_as_json(env, 
+                             logs_folder_path, 
+                             hyperparameters
+                             )
 
 pime_ppo_controller = PIME_PPO(
                             env, 
                             scheduller, 
                             ensemble, 
                             # trained_pid,
-                            **pid_optimized_params,
+                            # **pid_optimized_params,
+                            optimized_Kp=0.75,
+                            optimized_Ki=0.10,
+                            optimized_Kd=0,
                             logs_folder_path=logs_folder_path,
 
                             # hyperparameters

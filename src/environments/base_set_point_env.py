@@ -148,8 +148,13 @@ class BaseSetPointEnv(gymnasium.Env):
         # TODO use "import signarute from inspect" to check if termination_rule and error_formula have right signarute
         if callable(termination_rule):
             self.termination_rule = termination_rule
+            self.termination_rule_print = lambda _: print("Using custom rule")
         elif isinstance(termination_rule, TerminationRule):
             self.termination_rule = termination_functions[termination_rule]
+            if (termination_rule == TerminationRule.MAX_STEPS):
+                self.termination_rule_print = lambda _: print(f"{self.done=} ({self.timestep}/{self.max_step})(timestep/max_step)")
+            elif (termination_rule == TerminationRule.INTERVALS):
+                self.termination_rule_print = lambda _: print(f"{self.done=} ({self.timestep}/{self.scheduller.intervals_sum})(timestep/scheduller.intervals_sum)")
         
         if callable(error_formula):
             self.error_formula    = error_formula
@@ -265,7 +270,7 @@ class BaseSetPointEnv(gymnasium.Env):
 
         self.timestep += 1 # Timestep should be updated before termination rule
         self.done = self.termination_rule(self.timestep, self.scheduller.intervals_sum, self.max_step)
-        print(f"{self.done=} ({self.timestep}/{self.scheduller.intervals_sum})(timestep/scheduller.intervals_sum) ({self.timestep}/{self.max_step})(timestep/max_step)")
+        self.termination_rule_print(None)
 
         # print(f"RETURNED OBS: {self.observation=} | Action: {action=} | Reward: {self.reward=}")
         # input(">>>")

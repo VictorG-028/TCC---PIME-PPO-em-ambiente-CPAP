@@ -99,6 +99,7 @@ class CpapEnv(BaseSetPointEnv):
             render_mode: Literal["terminal"] = "terminal",
 
             # Created parameters
+            action_bounds: tuple[float, float] = (0, 100), # [cmH2O]
             max_step: int = 30, # simulation_time [s]
             sample_frequency: int = 1000, # [Hz]
             ):
@@ -134,8 +135,8 @@ class CpapEnv(BaseSetPointEnv):
 
         # Definindo o espaço de ações (u_t)
         self.action_space = spaces.Box(
-            low=0,
-            high=100,
+            low=action_bounds[0],
+            high=action_bounds[1],
             dtype=np.float64
         )
 
@@ -282,6 +283,7 @@ class CpapEnv(BaseSetPointEnv):
                                 intervals: list[float] = [500, 500, 500],
                                 distributions: dict[str, tuple[str, dict[str, float]]] = None,
                                 integrator_bounds: tuple[float, float] = (-25, 25),
+                                action_bounds: tuple[float, float] = (0, 100),
                                 ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
 
@@ -342,6 +344,7 @@ class CpapEnv(BaseSetPointEnv):
                         error_formula          = ErrorFormula.DIFFERENCE,
                         reward_formula         = RewardFormula.DIFFERENCE_SQUARED,
                         integrator_clip_bounds = integrator_bounds,
+                        action_bounds          = action_bounds,
                         )
         env = DictToArrayWrapper(env)
 

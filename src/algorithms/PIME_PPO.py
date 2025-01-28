@@ -1,7 +1,8 @@
 from typing import Callable, Literal, Optional
 import math
-import os
 import re
+from datetime import datetime
+import locale
 import gymnasium
 import numpy as np
 import pandas as pd
@@ -20,6 +21,7 @@ from algorithms.PID_Controller import PIDController
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
 from modules.EnsembleGenerator import EnsembleGenerator
+from modules.SaveFiles import create_dir_if_not_exists
 from modules.Scheduller import Scheduller
 
 
@@ -187,7 +189,7 @@ class PIME_PPO:
                                                 env.unwrapped.error_formula,
                                                 controller_type = pid_type
                                                 ) 
-
+            
         self.env = env
         self.scheduller = scheduller
         self.ensemble = ensemble_generator
@@ -197,12 +199,6 @@ class PIME_PPO:
         self.sample_period = sample_period
         self.logs_folder_path = logs_folder_path
 
-        # flat_obs_space = flatten_observation_space(self.env.observation_space)
-        # print(buffer_size)
-        # print(self.env.observation_space)
-        # print(self.env.action_space)
-        # print(flat_obs_space, type(flat_obs_space))
-        # print("@@@@@@@@@@@@@@@@@@")
 
         # Nota: Ao criar uma nova TerminationRule, é necessário fazer um novo elif que calcula o steps_per_episode em função dessa nova regra.
         if env.unwrapped.max_step is not None:
@@ -210,13 +206,14 @@ class PIME_PPO:
         else:
             self.steps_per_episode = env.unwrapped.scheduller.intervals_sum
 
+
         if buffer_size is None:
             # n_envs = buffer size, uma vez que num_envs = 1
             buffer_size = self.steps_per_episode * ensemble_size * episodes_per_sample
                           
         self.buffer_size = buffer_size
             
-        print(f"{buffer_size=}")
+
         """Lembrar:
             Definir buffer_size usando rollout_buffer_kwargs ou buffer_size não funciona. 
             Olhando o código fonte, precisa definir n_steps que é  "the number 
@@ -241,9 +238,7 @@ class PIME_PPO:
         
         # Setup logger (mandatory to avoid "AttributeError: 'PPO' object has no attribute '_logger'.")
         # https://stable-baselines3.readthedocs.io/en/master/common/logger.html
-        if not os.path.exists(logs_folder_path):
-            os.makedirs(logs_folder_path)
-            print(f"[Aviso] Pasta '{logs_folder_path}' foi criada para armazenar os logs.")
+        create_dir_if_not_exists(logs_folder_path)
         new_logger = configure(logs_folder_path, ["stdout", "csv", "tensorboard"])
         self.ppo.set_logger(new_logger)
 
@@ -257,7 +252,7 @@ class PIME_PPO:
 
         assert steps_to_run > 0, "steps_to_run must be greater than 0."
 
-        records = [] # (*x_vector, y_ref, z_t, action, reward, error, steps_in_episode, is_start_episode)
+        records = [] # (*x_vector, y_ref, z_t, PID_action, PPO_action, action, reward, error, steps_in_episode, is_start_episode)
         
         # steps_extra_info: list[tuple] = []
         steps_in_episode = 0
@@ -281,8 +276,9 @@ class PIME_PPO:
                         pi_action = self.pid_controller(self.env.unwrapped.error)
 
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
+                        ppo_action = ppo_action.item()
 
-                        action = pi_action + ppo_action.item()
+                        action = pi_action + ppo_action
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         steps_in_episode += 1
@@ -298,7 +294,7 @@ class PIME_PPO:
 
                         total_steps_counter += 1
                         self.ppo.rollout_buffer.add(obs, action, reward, is_start_episode, value, log_prob)
-                        records.append((*obs, action, reward, self.env.unwrapped.error, steps_in_episode, is_start_episode))
+                        records.append((*obs, max(pi_action, 0), ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode, is_start_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
                         is_start_episode = False
@@ -321,7 +317,7 @@ class PIME_PPO:
         pd.DataFrame(
             records, 
             columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                    ["y_ref", "z_t", "action", "reward", "error", "steps_in_episode", "is_start_episode"]
+                    ["y_ref", "z_t", "PID_action", "PPO_action", "action", "reward", "error", "steps_in_episode", "is_start_episode"]
         ).to_csv(
             f"{self.logs_folder_path}/records.csv", 
             index=False
