@@ -163,6 +163,10 @@ class PIME_PPO:
                  gae_lambda: float = 0.97,                                  # PPO param
                  vf_coef: float = 1.0,                                      # PPO param c1 = vf_coef
                  ent_coef: float = 0.02,                                    # PPO param c2 = ent_coef
+                 horizon: int = 200,                                        # PPO param
+                 adam_stepsize: float = 3e-4,                               # PPO param
+                 minibatch_size: int = 256,                                 # PPO param
+                 epochs: int = 10,                                          # PPO param
                  integrator_bounds: tuple[int, int] = (-25, 25),            # Clip para PID e PPO (formula do integrator)
                  pid_type: Literal["PID", "PI", "P"] = "PI",                # PID, PI or P
                  sample_period: int = 1,                                    # Euler method sampling period (dt)
@@ -231,9 +235,13 @@ class PIME_PPO:
                        ent_coef              = ent_coef,             # 1.0
                        rollout_buffer_class  = RolloutBuffer,        #
                        seed                  = seed,                 #
-                       # rollout_buffer_kwargs = {'buffer_size': buffer_size},
-                       # buffer_size           = buffer_size,
-                       n_steps               = self.buffer_size,
+                       # rollout_buffer_kwargs = {'buffer_size': self.buffer_size},
+                       # buffer_size           = self.buffer_size,
+                       # n_steps               = self.buffer_size,
+                       n_steps               = horizon,               # Number of steps to run for each environment per update
+                       learning_rate         = adam_stepsize,
+                       batch_size            = minibatch_size,
+                       n_epochs              = epochs,
                        )
         
         # Setup logger (mandatory to avoid "AttributeError: 'PPO' object has no attribute '_logger'.")
@@ -262,6 +270,15 @@ class PIME_PPO:
         iterations: int = math.ceil(steps_to_run / steps_per_iteration)
         print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
+        branchless_train_and_reset = {
+            True: lambda: (
+                            self.ppo.train(),
+                            self.ppo.rollout_buffer.reset(),
+                            setattr(self, "steps_in_buffer", 0)
+                        ),
+            False: lambda: None
+        }
+        
         for iteration in range(1, iterations+1):
 
             for m in range(self.ensemble_size):
@@ -282,6 +299,7 @@ class PIME_PPO:
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         steps_in_episode += 1
+                        total_steps_counter += 1          
 
                         # Get value and log_prob
                         obs_tensor = pyTorch.tensor(obs, dtype=pyTorch.float32).unsqueeze(0)
@@ -292,19 +310,23 @@ class PIME_PPO:
                             log_prob = policy_generated_distribution.log_prob(action_tensor)
 
 
-                        total_steps_counter += 1
                         self.ppo.rollout_buffer.add(obs, action, reward, is_start_episode, value, log_prob)
                         records.append((*obs, max(pi_action, 0), ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode, is_start_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
                         is_start_episode = False
 
+                        # Treine e resete o buffer ao atingir `n_steps` (branchless)
+                        branchless_train_and_reset[
+                            total_steps_counter % self.ppo.n_steps == 0
+                        ]()
+
                     # Post episode run
                     print(f"{steps_in_episode=}")
                     steps_in_episode = 0
 
-            self.ppo.train()
-            self.ppo.rollout_buffer.reset()
+            # self.ppo.train()
+            # self.ppo.rollout_buffer.reset()
             self.ppo.logger.record("train/iteration", iteration)
             self.ppo.logger.dump(iteration)
         
@@ -317,7 +339,7 @@ class PIME_PPO:
         pd.DataFrame(
             records, 
             columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                    ["y_ref", "z_t", "PID_action", "PPO_action", "action", "reward", "error", "steps_in_episode", "is_start_episode"]
+                    ["y_ref", "z_t", "PID_action", "PPO_action", "combined_action", "reward", "error", "steps_in_episode", "is_start_episode"]
         ).to_csv(
             f"{self.logs_folder_path}/records.csv", 
             index=False

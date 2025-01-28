@@ -9,21 +9,26 @@ from modules.SaveFiles import save_hyperparameters_as_json
 
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 current_date_time = datetime.now().strftime("%d-%m-%H%M") # day-month-hourminute
+base_dir = "logs/ppo/{env_name}/"+current_date_time
 
 experiments = {
     'double_water_tank': {
         'create_env_function': CascadeWaterTankEnv.create_water_tank_environment,
-        'logs_folder_path': f"logs/ppo/double_water_tank/{current_date_time}",
+        'logs_folder_path': base_dir.format(env_name="double_water_tank"),
 
         "hyperparameters": {
             "seed": 42,
             "PIME_PPO": {
                 ## PPO
-                "vf_coef": 1.0,
-                "ent_coef": 0.02,
+                "vf_coef": 0.02,
+                "ent_coef": 1.0,
                 "gae_lambda": 0.97,
                 "clip_range": 0.2,
-                "gamma": 0.99,
+                "gamma": 0.995,
+                "horizon": 200,
+                "adam_stepsize": 3e-4,
+                "minibatch_size": 256,
+                "epochs": 10,
 
                 ## PIME
                 "tracked_point_name": 'x2',
@@ -51,12 +56,12 @@ experiments = {
     },
     'ph_control': {
         'create_env_function': PhControl.create_ph_control_environment,
-        'logs_folder_path': f"logs/ppo/ph_control/{current_date_time}",
+        'logs_folder_path': base_dir.format(env_name="ph_control"),
         'tracked_point': 'x2',
     },
     'CPAP': {
         'create_env_function': CpapEnv.create_cpap_environment,
-        'logs_folder_path': f"logs/ppo/CPAP/{current_date_time}",
+        'logs_folder_path': base_dir.format(env_name="CPAP"),
 
         "hyperparameters": {
             "seed": 42,
@@ -67,6 +72,11 @@ experiments = {
                 "gae_lambda": 0.97,
                 "clip_range": 0.2,
                 "gamma": 0.99,
+                "horizon": 200,
+                "adam_stepsize": 3e-4,
+                "minibatch_size": 256,
+                "epochs": 10,
+
 
                 ## PIME
                 "tracked_point_name": 'x3',
@@ -137,8 +147,8 @@ pime_ppo_controller = PIME_PPO(
                             ensemble, 
                             # trained_pid,
                             # **pid_optimized_params,
-                            optimized_Kp=0.75,
-                            optimized_Ki=0.10,
+                            optimized_Kp=0.9,
+                            optimized_Ki=0.05,
                             optimized_Kd=0,
                             logs_folder_path=logs_folder_path,
 
