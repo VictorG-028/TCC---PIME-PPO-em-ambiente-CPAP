@@ -284,6 +284,7 @@ class CpapEnv(BaseSetPointEnv):
                                 distributions: dict[str, tuple[str, dict[str, float]]] = None,
                                 integrator_bounds: tuple[float, float] = (-25, 25),
                                 action_bounds: tuple[float, float] = (0, 100),
+                                pid_type: Literal["PID", "PI", "P"] = "PI",
                                 ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
 
@@ -399,7 +400,7 @@ class CpapEnv(BaseSetPointEnv):
         trained_pid, pid_optimized_params = PIDController.train_pid_controller(
             cpap_model, 
             pid_training_method='BFGS',
-            pid_type="PI"
+            pid_type=pid_type,
         )
 
         return env, scheduller, ensemble, trained_pid, pid_optimized_params

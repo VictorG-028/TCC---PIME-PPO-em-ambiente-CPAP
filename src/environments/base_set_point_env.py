@@ -152,9 +152,9 @@ class BaseSetPointEnv(gymnasium.Env):
         elif isinstance(termination_rule, TerminationRule):
             self.termination_rule = termination_functions[termination_rule]
             if (termination_rule == TerminationRule.MAX_STEPS):
-                self.termination_rule_print = lambda _: print(f"{self.done=} ({self.timestep}/{self.max_step})(timestep/max_step)")
+                self.termination_rule_print = lambda: print(f"{self.done=} ({self.timestep}/{self.max_step})(timestep/max_step)")
             elif (termination_rule == TerminationRule.INTERVALS):
-                self.termination_rule_print = lambda _: print(f"{self.done=} ({self.timestep}/{self.scheduller.intervals_sum})(timestep/scheduller.intervals_sum)")
+                self.termination_rule_print = lambda: print(f"{self.done=} ({self.timestep}/{self.scheduller.intervals_sum})(timestep/scheduller.intervals_sum)")
         
         if callable(error_formula):
             self.error_formula    = error_formula
@@ -244,7 +244,7 @@ class BaseSetPointEnv(gymnasium.Env):
         return self.observation, {}
     
 
-    @debug_print_extra_info
+    # [uncomment] @debug_print_extra_info
     def step(self, action: np.float64):
         set_point: np.float64 = self.scheduller.get_set_point_at(step=self.timestep)
         # print(f"{action=}")
@@ -270,7 +270,7 @@ class BaseSetPointEnv(gymnasium.Env):
 
         self.timestep += 1 # Timestep should be updated before termination rule
         self.done = self.termination_rule(self.timestep, self.scheduller.intervals_sum, self.max_step)
-        self.termination_rule_print(None)
+        # [uncomment] self.termination_rule_print()
 
         # print(f"RETURNED OBS: {self.observation=} | Action: {action=} | Reward: {self.reward=}")
         # input(">>>")

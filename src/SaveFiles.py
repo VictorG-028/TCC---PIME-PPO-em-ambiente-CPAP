@@ -6,7 +6,7 @@ import gymnasium
 
 def save_hyperparameters_as_json(env: gymnasium.Env, 
                                  logs_folder_path: str,
-                                 hyperparameters: dict[str, Any]
+                                 params_dict: dict[str, Any]
                                  ) -> None:
     """
     Adds info from env to hypeparameters and then saves hypeparameters as a json file.
@@ -16,17 +16,19 @@ def save_hyperparameters_as_json(env: gymnasium.Env,
     #     "min": str(env.unwrapped.action_space.low.tolist()[0]),
     #     "max": str(env.unwrapped.action_space.high.tolist()[0])
     # }
+    params_copy = params_dict.copy()
+    params_copy.pop("create_env_function")
 
-    hyperparameters["observation_space"] = {}
+    params_copy["hyperparameters"]["observation_space"] = {}
     for key, box in env.unwrapped.observation_space.spaces.items():
-        hyperparameters["observation_space"][key] = {
+        params_copy["hyperparameters"]["observation_space"][key] = {
             "min": str(box.low.tolist()[0]), 
             "max": str(box.high.tolist()[0])
         }
 
     create_dir_if_not_exists(logs_folder_path)
     with open(f"{logs_folder_path}/hyperparameters.json", "w") as f:
-        json.dump(hyperparameters, f, indent=4)
+        json.dump(params_copy, f, indent=4)
 
 
 

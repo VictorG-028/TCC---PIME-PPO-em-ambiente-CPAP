@@ -1,15 +1,21 @@
 from datetime import datetime
 import locale
 
-from algorithms.PIME_PPO import PIME_PPO
 from environments.CPAP_env import CpapEnv
 from environments.cascade_water_tank_env import CascadeWaterTankEnv
 from environments.ph_control_env import PhControl
-from modules.SaveFiles import save_hyperparameters_as_json
 
+from optuna_training import run_optuna
+from training import run_training
+
+################################################################################
+
+# Set locale to pt_BR to show time in portuguese
 locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 current_date_time = datetime.now().strftime("%d-%m-%H%M") # day-month-hourminute
 base_dir = "logs/ppo/{env_name}/"+current_date_time
+
+################################################################################
 
 experiments = {
     'double_water_tank': {
@@ -17,28 +23,38 @@ experiments = {
         'logs_folder_path': base_dir.format(env_name="double_water_tank"),
 
         "hyperparameters": {
+            "extra info": "função de simulação control", # "função de simulação usando biblioteca control",
             "seed": 42,
             "PIME_PPO": {
                 ## PPO
-                "vf_coef": 0.02,
-                "ent_coef": 1.0,
+                "vf_coef": 1.0, # Optuna nesse [0.01 até 10.0]
+                "ent_coef": 0.02,
                 "gae_lambda": 0.97,
                 "clip_range": 0.2,
-                "gamma": 0.995,
-                "horizon": 200,
-                "adam_stepsize": 3e-4,
-                "minibatch_size": 256,
+                "discount": 0.995,
+                "horizon": 200, # Optuna nesse # pode variar até valor grande (1000)
+                "adam_stepsize": 3e-4, # Optuna nesse [float entre e-2 até e-5]
+                "minibatch_size": 256, # Optuna nesse # 256 valor grande # usar 2^n
                 "epochs": 10,
+                "ensemble_size": 1, # usar optuna com ensemble_size == 1
+                "divide_neural_network": False,
+                "neurons_per_layer": 100,
+                "activation_function_name": "no activation",
 
                 ## PIME
                 "tracked_point_name": 'x2',
-                "episodes_per_sample": 5,
+                "episodes_per_sample": 5, # esse parâmetro tanto faz pro optuna
+
+                # PID (ZN - kp=8.80 e ki=11.46)
+                "Kp": 8.8, 
+                "Ki": 0.015,
+                "Kd": 0,
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "action_bounds": (0, 1),            # [V]
-                "observation_max_bounds": (10, 10), # [cm]
-                "PID_type": "PI",
+                "ppo_action_bounds": (-1, 1),           # [V]
+                "ppo_observation_max_bounds": (10, 10), # [cm]
+                "pid_type": "PI",
             },
             ## Scheduller
             "set_points": [3, 6, 9, 4, 2], # [cm]
@@ -50,7 +66,7 @@ experiments = {
                 "p1": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p1
                 "p2": ("uniform", {"low": 0.0015, "high": 0.0024}),  # p2
                 "p3": ("uniform", {"low": 0.07, "high": 0.17}),      # p3
-                "dt": ("constant", {"constant": 2}),                 # dt sample time [s]
+                "dt": ("constant", {"constant": 2}),                 # dt sample time [s] # Antees tava 2 segundso
             },
         }
     },
@@ -71,21 +87,26 @@ experiments = {
                 "ent_coef": 0.02,
                 "gae_lambda": 0.97,
                 "clip_range": 0.2,
-                "gamma": 0.99,
+                "discount": 0.99,
                 "horizon": 200,
                 "adam_stepsize": 3e-4,
                 "minibatch_size": 256,
                 "epochs": 10,
-
+                "ensemble_size": 2,
 
                 ## PIME
                 "tracked_point_name": 'x3',
                 "episodes_per_sample": 5,
+
+                # PID
+                "Kp": 2.5,
+                "Ki": 0.030,
+                "Kd": 0,
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "action_bounds": (0, 100),        # [cmH2O]
-                "PID_type": "PI",
+                "ppo_action_bounds": (0, 100),        # [cmH2O]
+                "pid_type": "PI",
             },
             ## Scheduller
             "set_points": [5, 15, 10],
@@ -128,36 +149,8 @@ experiments = {
     },
 }
 
-create_env_function, logs_folder_path, hyperparameters = experiments['double_water_tank'].values()
-env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_function(
-    hyperparameters["seed"],
-    hyperparameters["set_points"],
-    hyperparameters["intervals"],
-    hyperparameters["distributions"],
-    hyperparameters["PID_and_Env"]["integrator_bounds"],
-)
-save_hyperparameters_as_json(env, 
-                             logs_folder_path, 
-                             hyperparameters
-                             )
+################################################################################
 
-pime_ppo_controller = PIME_PPO(
-                            env, 
-                            scheduller, 
-                            ensemble, 
-                            # trained_pid,
-                            # **pid_optimized_params,
-                            optimized_Kp=0.9,
-                            optimized_Ki=0.05,
-                            optimized_Kd=0,
-                            logs_folder_path=logs_folder_path,
+# run_training(experiments["double_water_tank"])
+run_optuna(experiments["double_water_tank"])
 
-                            # hyperparameters
-                            **hyperparameters["PIME_PPO"],
-                            integrator_bounds=hyperparameters["PID_and_Env"]["integrator_bounds"],
-                            pid_type=hyperparameters["PID_and_Env"]["PID_type"],
-                            sample_period=hyperparameters["distributions"]["dt"][1]["constant"],
-                            seed=hyperparameters["seed"]
-                            )
-
-pime_ppo_controller.train(steps_to_run = 1_000_000)
