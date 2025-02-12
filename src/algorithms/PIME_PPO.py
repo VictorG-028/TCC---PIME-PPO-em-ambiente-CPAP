@@ -1,8 +1,6 @@
 from typing import Callable, Literal, Optional
 import math
 import re
-from datetime import datetime
-import locale
 import gymnasium
 import numpy as np
 import pandas as pd
@@ -21,7 +19,7 @@ from algorithms.PID_Controller import PIDController
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
 from modules.EnsembleGenerator import EnsembleGenerator
-from SaveFiles import create_dir_if_not_exists
+from save_file_utils import create_dir_if_not_exists
 from modules.Scheduller import Scheduller
 
 
@@ -305,10 +303,11 @@ class PIME_PPO:
                  Ki: np.float64 = 1,                                                   # 
                  Kd: np.float64 = 0,                                                   # Kd is not used in PIME PPO
                  tracked_point_name: str = 'x1',                                       # string like "x[integer]"
-                 verbose: int = 1,                                                     # 
-                 logs_folder_path: str = "logs/ppo/",                                  # PPO logs
+                 use_GPU: bool = False,                                                # False for CPU, True for GPU
+                 logs_folder_path: str = "logs/ppo/",                                  # All logs and outputs will be saved here
                  buffer_size: Optional[int] = None,                                    # buffer_size = ensemble_size * episode_lenght (minimum size needed to not get buffer overflow error)
                  episodes_per_sample: int = 5,                                         # Number of episodes collected for one parameter set
+                 ppo_verbose: Literal[0, 1, 2] = 0,                                    # PPO param - 0 1 2
                  discount = 0.99,                                                      # PPO param - Discount factor
                  clip_range: float = 0.2,                                              # PPO param
                  gae_lambda: float = 0.97,                                             # PPO param
@@ -325,7 +324,7 @@ class PIME_PPO:
                  pid_type: Literal["PID", "PI", "P"] = "PI",                           # PID, PI or P
                  sample_period: int = 1,                                               # Euler method sampling period (dt)
                  seed: Optional[int] = None,                                           # Seed for reproducibility
-                 ) -> None:
+                ) -> None:
         """
         #### NOTE:
         buffer size depende do tamanho do episódio e do tamanho do ensemble. 
@@ -370,7 +369,9 @@ class PIME_PPO:
             buffer_size = self.steps_per_episode * ensemble_size * episodes_per_sample
                           
         self.buffer_size = buffer_size
-            
+        
+        self.device = pyTorch.device("cuda" if use_GPU else "cpu")
+        
 
         """Lembrar:
             Definir buffer_size usando rollout_buffer_kwargs ou buffer_size não funciona. 
@@ -380,7 +381,8 @@ class PIME_PPO:
         """
         self.ppo = PPO(CustomActorCriticPolicy, 
                        env, 
-                       verbose               = verbose,              #
+                       device                = self.device,
+                       verbose               = ppo_verbose,          #
                        gamma                 = discount,             # Discount factor
                        gae_lambda            = gae_lambda,           # Factor for trade-off of bias vs variance for Generalized Advantage Estimator. Equivalent to classic advantage when set to 1.
                        clip_range            = clip_range,           #
@@ -410,8 +412,6 @@ class PIME_PPO:
         self.ppo.set_logger(new_logger)
 
 
-
-
     def train(self, 
               steps_to_run = 100_000,
               extra_record_only_pid: bool = False,
@@ -431,16 +431,21 @@ class PIME_PPO:
         steps_in_episode = 0
         total_steps_counter = 0
 
+        device = self.device
+
         steps_per_iteration = self.steps_per_episode * self.ensemble_size * self.episodes_per_sample
         iterations: int = math.ceil(steps_to_run / steps_per_iteration)
         # [uncomment] print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
+        # last_log = {}
+        def train_ppo() -> None:
+            # nonlocal last_log
+            self.ppo.train()
+            # last_log = self.ppo.logger.name_to_value,
+            self.ppo.rollout_buffer.reset()
+
         branchless_train_and_reset = {
-            True: lambda: (
-                            # print(f"Training at {total_steps_counter=}"),
-                            self.ppo.train(),
-                            self.ppo.rollout_buffer.reset(),
-                        ),
+            True: train_ppo,
             False: lambda: None
         }
         
@@ -464,7 +469,7 @@ class PIME_PPO:
 
                         action = pi_action + ppo_action
                         # action = pi_action + ppo_action * self.env.unwrapped.error
-                        # action = pi_action
+                        # action = pi_action * ppo_action
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         steps_in_episode += 1
@@ -472,8 +477,8 @@ class PIME_PPO:
                         episode_reward += reward      
 
                         # Get value and log_prob
-                        obs_tensor = pyTorch.tensor(obs, dtype=pyTorch.float32).unsqueeze(0)
-                        action_tensor = pyTorch.tensor([ppo_action], dtype=pyTorch.float32)
+                        obs_tensor = pyTorch.tensor(obs, dtype=pyTorch.float32).unsqueeze(0).to(device)
+                        action_tensor = pyTorch.tensor([ppo_action], dtype=pyTorch.float32).to(device)
                         with pyTorch.no_grad():
                             value = self.ppo.policy.predict_values(obs_tensor)
                             policy_generated_distribution = self.ppo.policy.get_distribution(obs_tensor)
@@ -499,10 +504,20 @@ class PIME_PPO:
             # self.ppo.train()
             # self.ppo.rollout_buffer.reset()
             self.ppo.logger.record("train/iteration", iteration)
-            self.ppo.logger.dump(iteration)
+
+
+        self.ppo.logger.dump(total_steps_counter)
         
-        counter_divided_by_iterations = total_steps_counter/iterations
-        is_same_as_buffer_size = counter_divided_by_iterations == self.buffer_size
+        # Print last ppo logs
+        # msg = "Última iteração de treinamento: "
+        # print("+" + "-" * len(msg) + "+")
+        # print(f"|{msg}" + "|")
+        # for key, value in last_log[0].items():
+        #     print(f"| {key}: {value}" + " " * (len(msg) - len(key) - len(str(value)) - 3) + "|")
+        # print("+" + "-" * len(msg) + "+")
+
+        # [uncomment] counter_divided_by_iterations = total_steps_counter/iterations
+        # [uncomment] is_same_as_buffer_size = counter_divided_by_iterations == self.buffer_size
         # [uncomment] print(f"{self.buffer_size=}")
         # [uncomment] print(f"{total_steps_counter=} divided by {iterations=} is equal to {counter_divided_by_iterations} ({is_same_as_buffer_size=})")
 
@@ -516,57 +531,96 @@ class PIME_PPO:
                 index=False
             )
 
+            # save last used sample_parameters
+            pd.DataFrame(
+                sample_parameters.items(), 
+                columns=["parameter_name", "parameter_value"]
+            ).to_json(
+                f"{self.logs_folder_path}/last_sample_parameters.json", 
+                orient="records"
+            )
+
+            
+
         if (should_save_trained_model):
             self.ppo.save(f"{self.logs_folder_path}/trained_ppo_model")
-        
+
+            policy_weights = self.ppo.policy.state_dict()
+            # pyTorch.save(policy_weights, f"{self.logs_folder_path}/trained_ppo_policy_weights.pth")
+            with open(f"{self.logs_folder_path}/trained_ppo_policy_weights.txt", "w") as f:
+                f.write(str(policy_weights)) # Save in plain text
         
         if (extra_record_only_pid and should_save_records):
-            records = []
-            steps_in_episode = 0
-            obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
-
-            while not done:
-                pi_action = self.pid_controller(self.env.unwrapped.error)
-                next_obs, reward, done, truncated, info = self.env.step(pi_action) 
-                steps_in_episode += 1
-                records.append((*obs, pi_action, reward, self.env.unwrapped.error, steps_in_episode))
-
-                obs = next_obs # Can update obs after storing in buffer
-            
-            pd.DataFrame(
-                records, 
-                columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                        ["y_ref", "z_t", "PID_action", "reward", "error", "steps_in_episode"]
-            ).to_csv(
-                f"{self.logs_folder_path}/only_pid_records.csv", 
-                index=False
-            )
+            self.record_pid_episode(sample_parameters)
 
         if (extra_record_only_ppo and should_save_records):
-            records = []
-            steps_in_episode = 0
-            obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
-
-            while not done:
-                ppo_action, next_hidden_state = self.ppo.predict(obs)
-                ppo_action = ppo_action.item()
-                next_obs, reward, done, truncated, info = self.env.step(ppo_action) 
-                steps_in_episode += 1
-                records.append((*obs, ppo_action, reward, self.env.unwrapped.error, steps_in_episode))
-
-                obs = next_obs
-            
-            pd.DataFrame(
-                records, 
-                columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                        ["y_ref", "z_t", "PPO_action", "reward", "error", "steps_in_episode"]
-            ).to_csv(
-                f"{self.logs_folder_path}/only_ppo_records.csv", 
-                index=False
-            )
+            self.record_ppo_episode(sample_parameters)
 
         return last_episode_reward
 
+
+    def record_pid_episode(self, sample_parameters: dict[str, float | int | np.ndarray]) -> None:
+        """
+        Records the PID controller response in a single episode and saves it in a csv file.
+        """
+        records = []
+        done = False
+        steps_in_episode = 0
+        obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
+
+        # execute 1 episode
+        while not done:
+            pi_action = self.pid_controller(self.env.unwrapped.error)
+            next_obs, reward, done, truncated, info = self.env.step(pi_action) 
+            steps_in_episode += 1
+            records.append((*obs, pi_action, reward, self.env.unwrapped.error, steps_in_episode))
+
+            obs = next_obs # Can update obs after storing in buffer
+        
+        pd.DataFrame(
+            records, 
+            columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
+                    ["y_ref", "z_t", "PID_action", "reward", "error", "steps_in_episode"]
+        ).to_csv(
+            f"{self.logs_folder_path}/only_pid_records.csv", 
+            index=False
+        )
+
+
+    def record_ppo_episode(self, 
+                           sample_parameters: dict[str, float | int | np.ndarray], 
+                           policy_weights: Optional[dict[str, any]] = None
+                           ) -> None:
+        """
+        Records the PPO without PID controller response in a single episode and saves it in a csv file.
+        """
+        records = []
+        done = False
+        steps_in_episode = 0
+        obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
+
+        # override ppo weights
+        if policy_weights is not None:
+            self.ppo.policy.load_state_dict(policy_weights)
+
+        # Execute one episode
+        while not done:
+            ppo_action, next_hidden_state = self.ppo.predict(obs)
+            ppo_action = ppo_action.item()
+            next_obs, reward, done, truncated, info = self.env.step(ppo_action) 
+            steps_in_episode += 1
+            records.append((*obs, ppo_action, reward, self.env.unwrapped.error, steps_in_episode))
+
+            obs = next_obs
+        
+        pd.DataFrame(
+            records, 
+            columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
+                    ["y_ref", "z_t", "PPO_action", "reward", "error", "steps_in_episode"]
+        ).to_csv(
+            f"{self.logs_folder_path}/only_ppo_records.csv", 
+            index=False
+        )
         
 
         

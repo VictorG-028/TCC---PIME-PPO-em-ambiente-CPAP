@@ -1,52 +1,50 @@
-from datetime import datetime
 import locale
+import sys
 
 from environments.CPAP_env import CpapEnv
 from environments.cascade_water_tank_env import CascadeWaterTankEnv
 from environments.ph_control_env import PhControl
 
-from optuna_training import run_optuna
 from training import run_training
+from optuna_training import run_optuna
 
 ################################################################################
 
-# Set locale to pt_BR to show time in portuguese
-locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
-current_date_time = datetime.now().strftime("%d-%m-%H%M") # day-month-hourminute
-base_dir = "logs/ppo/{env_name}/"+current_date_time
+locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8') # show date and time in portuguese format
 
 ################################################################################
 
 experiments = {
     'double_water_tank': {
-        'create_env_function': CascadeWaterTankEnv.create_water_tank_environment,
-        'logs_folder_path': base_dir.format(env_name="double_water_tank"),
+        "create_env_function": CascadeWaterTankEnv.create_water_tank_environment,
+        "training_logs_folder_path": "logs/ppo/double_water_tank/trainings/{id}",
+        "best_results_folder_path": "logs/ppo/double_water_tank/best/",
 
         "hyperparameters": {
             "extra info": "função de simulação control", # "função de simulação usando biblioteca control",
             "seed": 42,
             "PIME_PPO": {
                 ## PPO
-                "vf_coef": 1.0, # Optuna nesse [0.01 até 10.0]
+                "vf_coef":  0.03380499200018451, 
                 "ent_coef": 0.02,
                 "gae_lambda": 0.97,
                 "clip_range": 0.2,
                 "discount": 0.995,
-                "horizon": 200, # Optuna nesse # pode variar até valor grande (1000)
-                "adam_stepsize": 3e-4, # Optuna nesse [float entre e-2 até e-5]
-                "minibatch_size": 256, # Optuna nesse # 256 valor grande # usar 2^n
+                "horizon": 200,
+                "adam_stepsize": 0.00018995764903048906,# 3e-4
+                "minibatch_size": 128,
                 "epochs": 10,
-                "ensemble_size": 1, # usar optuna com ensemble_size == 1
+                "ensemble_size": 1,
                 "divide_neural_network": False,
-                "neurons_per_layer": 100,
-                "activation_function_name": "no activation",
+                "neurons_per_layer": 36,
+                "activation_function_name": "relu", # "no activation" "relu" "tanh"
 
                 ## PIME
                 "tracked_point_name": 'x2',
-                "episodes_per_sample": 5, # esse parâmetro tanto faz pro optuna
+                "episodes_per_sample": 5,
 
                 # PID (ZN - kp=8.80 e ki=11.46)
-                "Kp": 8.8, 
+                "Kp": 5.8, 
                 "Ki": 0.015,
                 "Kd": 0,
             },
@@ -72,12 +70,12 @@ experiments = {
     },
     'ph_control': {
         'create_env_function': PhControl.create_ph_control_environment,
-        'logs_folder_path': base_dir.format(env_name="ph_control"),
+        'logs_folder_path': "logs/ppo/ph_control/{start_date_time}",
         'tracked_point': 'x2',
     },
     'CPAP': {
         'create_env_function': CpapEnv.create_cpap_environment,
-        'logs_folder_path': base_dir.format(env_name="CPAP"),
+        'logs_folder_path': "logs/ppo/CPAP/{start_date_time}",
 
         "hyperparameters": {
             "seed": 42,
@@ -151,6 +149,32 @@ experiments = {
 
 ################################################################################
 
-# run_training(experiments["double_water_tank"])
-run_optuna(experiments["double_water_tank"])
+
+with open("logs/terminal_outputs.tst", 'w') as f:
+
+    sys.stdout = f
+
+    # run_training(
+    #     experiments["double_water_tank"], 
+    #     steps_to_run=400_000, 
+    #     should_save_records=True,
+    #     extra_record_only_pid=True,
+    #     should_save_trained_model=True,
+    #     use_GPU=False
+    # )
+
+    run_optuna(
+        experiments["double_water_tank"], 
+        steps_to_run=400_000, 
+        should_save_records=True,
+        extra_record_only_pid=False,
+        should_save_trained_model=False,
+        n_trials=17*7, 
+        n_jobs=17, 
+        use_GPU=False
+    )
+
+    sys.stdout = sys.__stdout__
+
+
 

@@ -32,6 +32,9 @@ class EnsembleGenerator:
 
         # Create all (name, function) pairs
         # __all__ is a variable inside numpy.random that have all distributions names
+        # for distribution_name in np_random.__all__:
+        #     if hasattr(np_random, distribution_name):
+        #         self.distributions_dict[distribution_name] = getattr(np_random, distribution_name)
         self.distributions_dict: dict[str, callable] = {
             distribution_name: getattr(np_random, distribution_name) 
             for distribution_name in np_random.__all__ 
@@ -44,12 +47,12 @@ class EnsembleGenerator:
         self.distributions_dict["constant"] = constant_distribution_function
     
     
-    def generate_sample(self) -> dict[float]:
+    def generate_sample(self) -> dict[str, float | int | np.ndarray]:
         """
         Gera uma única amostra de parâmetros.
 
         Returns:
-            dict[float]: Um dicionário com os parâmetros gerados.
+            dict[str, float | int]: Um dicionário com os parâmetros gerados.
         """
         sample = {}
         for parameter_name, (distribution_name, distribution_inputs) in self.distributions.items():
@@ -61,7 +64,7 @@ class EnsembleGenerator:
                 sample[parameter_name] = distribution_inputs["constant"]
                 continue
                 
-            distribution_function = getattr(np_random, distribution_name)
+            distribution_function: callable = getattr(np_random, distribution_name)
             sample[parameter_name] = distribution_function(**distribution_inputs)
         
         return sample

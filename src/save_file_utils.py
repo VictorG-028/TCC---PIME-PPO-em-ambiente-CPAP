@@ -39,3 +39,32 @@ def create_dir_if_not_exists(dir_path: str) -> None:
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
         print(f"[Aviso] Pasta '{dir_path}' foi criada para armazenar os logs.")
+
+
+
+def create_textfile_if_not_exists(file_path: str, content: str) -> None:
+    """
+    Prints a warn if the file was created.
+    """
+
+    assert file_path.endswith(".txt"), "O file_path deve ser um arquivo .txt"
+
+    if not os.path.exists(file_path):
+        with open(file_path, 'w') as f:
+            f.write(content)
+        print(f"[Aviso] Arquivo '{file_path}' foi criado.")
+    
+
+def read_textfile_and_increment_id(file_path: str) -> int:
+    """
+    Reads the content of a text file, increments it by 1 and saves it back to the file.
+    """
+    with open(file_path, 'r') as f:
+        content = f.read()
+
+    content = int(content) + 1
+
+    with open(file_path, 'w') as f:
+        f.write(str(content))
+
+    return content

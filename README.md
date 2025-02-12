@@ -25,10 +25,9 @@ source tcc_venv/bin/activate  # Linux, macOS
 # tcc_venv\Scripts\activate # CMD, Powershell
 # source tcc_venv/Scripts/activate # Git Bash terminal open in Windows
 
-# Setup and run training
+# Setup and run training (requires Nvidia GPU, edit requirements.txt to toggle for CPU only)
 pip install -r requirements.txt
 python src/main.py
-
-# See log results after training (log folder is created automatically)
-tensorboard --logdir=logs/ppo
 ```
+<!-- # See log results after training (log folder is created automatically) -->
+<!-- tensorboard --logdir=logs/ppo -->

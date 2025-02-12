@@ -1,12 +1,23 @@
-
+from datetime import datetime
 
 from algorithms.PIME_PPO import PIME_PPO
-from SaveFiles import save_hyperparameters_as_json
+from save_file_utils import save_hyperparameters_as_json
 
 
-def run_training(experiment: dict[str, any]) -> None:
+def run_training(
+        experiment: dict[str, any], 
+        steps_to_run = 100_000,
+        extra_record_only_pid = False,
+        should_save_records = False,
+        should_save_trained_model = False,
+        use_GPU = False
+    ) -> None:
 
-    create_env_function, logs_folder_path, hyperparameters = experiment.values()
+    current_date_time = datetime.now().strftime("%d-%m-%H%M")  # Format: day-month-hourminute
+    training_logs_folder_path = experiment["training_logs_folder_path"].format(id=current_date_time)
+    create_env_function = experiment["create_env_function"] 
+    hyperparameters = experiment["hyperparameters"]
+
     env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_function(
         hyperparameters["seed"],
         hyperparameters["set_points"],
@@ -18,24 +29,28 @@ def run_training(experiment: dict[str, any]) -> None:
     # hyperparameters["PIME_PPO"]["Ki"] = pid_optimized_params["optimized_Ki"],
     # hyperparameters["PIME_PPO"]["Kd"] = pid_optimized_params["optimized_Kd"],
 
-    save_hyperparameters_as_json(env, 
-                                 logs_folder_path, 
-                                 experiment
-                                )
+    save_hyperparameters_as_json(
+        env, 
+        training_logs_folder_path, 
+        experiment
+    )
 
     pime_ppo_controller = PIME_PPO(
-                                env, 
-                                scheduller, 
-                                ensemble, 
-                                **hyperparameters["PIME_PPO"],
-                                logs_folder_path=logs_folder_path,
-                                integrator_bounds=hyperparameters["PID_and_Env"]["integrator_bounds"],
-                                pid_type=hyperparameters["PID_and_Env"]["pid_type"],
-                                sample_period=hyperparameters["distributions"]["dt"][1]["constant"],
-                                seed=hyperparameters["seed"]
-                                )
+        env, 
+        scheduller, 
+        ensemble, 
+        **hyperparameters["PIME_PPO"],
+        use_GPU=use_GPU,
+        logs_folder_path=training_logs_folder_path,
+        integrator_bounds=hyperparameters["PID_and_Env"]["integrator_bounds"],
+        pid_type=hyperparameters["PID_and_Env"]["pid_type"],
+        sample_period=hyperparameters["distributions"]["dt"][1]["constant"],
+        seed=hyperparameters["seed"]
+    )
 
-    pime_ppo_controller.train(steps_to_run = 1_000_000, 
-                            extra_record_only_pid=True,
-                            should_save_records=True
-                            )
+    score = pime_ppo_controller.train(
+        steps_to_run=steps_to_run, 
+        extra_record_only_pid=extra_record_only_pid,
+        should_save_records=should_save_records,
+        should_save_trained_model=should_save_trained_model
+    )
