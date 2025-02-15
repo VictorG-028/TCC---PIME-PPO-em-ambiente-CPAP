@@ -25,26 +25,26 @@ experiments = {
             "seed": 42,
             "PIME_PPO": {
                 ## PPO
-                "vf_coef":  0.03380499200018451, 
+                "vf_coef":  1.0, 
                 "ent_coef": 0.02,
                 "gae_lambda": 0.97,
                 "clip_range": 0.2,
                 "discount": 0.995,
                 "horizon": 200,
-                "adam_stepsize": 0.00018995764903048906,# 3e-4
+                "adam_stepsize": 3e-4,
                 "minibatch_size": 128,
                 "epochs": 10,
-                "ensemble_size": 1,
-                "divide_neural_network": False,
-                "neurons_per_layer": 36,
-                "activation_function_name": "relu", # "no activation" "relu" "tanh"
+                "ensemble_size": 5,
+                "divide_neural_network": True,
+                "neurons_per_layer": 6,
+                "activation_function_name": "no activation", # "no activation" "relu" "tanh"
 
                 ## PIME
                 "tracked_point_name": 'x2',
                 "episodes_per_sample": 5,
 
                 # PID (ZN - kp=8.80 e ki=11.46)
-                "Kp": 5.8, 
+                "Kp": 8.8, 
                 "Ki": 0.015,
                 "Kd": 0,
             },
@@ -52,7 +52,7 @@ experiments = {
                 "integrator_bounds": (-25, 25),
                 "ppo_action_bounds": (-1, 1),           # [V]
                 "ppo_observation_max_bounds": (10, 10), # [cm]
-                "pid_type": "PI",
+                "pid_type": "P",
             },
             ## Scheduller
             "set_points": [3, 6, 9, 4, 2], # [cm]
@@ -154,25 +154,25 @@ with open("logs/terminal_outputs.tst", 'w') as f:
 
     sys.stdout = f
 
-    # run_training(
-    #     experiments["double_water_tank"], 
-    #     steps_to_run=400_000, 
-    #     should_save_records=True,
-    #     extra_record_only_pid=True,
-    #     should_save_trained_model=True,
-    #     use_GPU=False
-    # )
-
-    run_optuna(
+    run_training(
         experiments["double_water_tank"], 
         steps_to_run=400_000, 
         should_save_records=True,
-        extra_record_only_pid=False,
-        should_save_trained_model=False,
-        n_trials=17*7, 
-        n_jobs=17, 
+        extra_record_only_pid=True,
+        should_save_trained_model=True,
         use_GPU=False
     )
+
+    # run_optuna(
+    #     experiments["double_water_tank"], 
+    #     steps_to_run=400_000, 
+    #     should_save_records=True,
+    #     extra_record_only_pid=False,
+    #     should_save_trained_model=False,
+    #     n_trials=17*7, 
+    #     n_jobs=17, 
+    #     use_GPU=False
+    # )
 
     sys.stdout = sys.__stdout__
 

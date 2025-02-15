@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import os
 
 import optuna
 from functools import partial
@@ -26,7 +27,9 @@ def run_optuna(
         def set_hyperparameter_search_space(trial: optuna.Trial, 
                                             base_hyperparameters: dict[str, any]
                                             ) -> dict[str, any]:
-            optimized_hyperparameters = {
+            
+            global search_space
+            search_space = {
                 "vf_coef": trial.suggest_float("vf_coef", 0.01, 10.0, log=True),
                 "horizon": trial.suggest_int("horizon", 200, 2000, step=200),
                 "minibatch_size": trial.suggest_categorical("minibatch_size", [32, 64, 128, 256]),
@@ -39,7 +42,7 @@ def run_optuna(
 
             # Atualiza os hiperparâmetros do experimento com os espaços de possíveis valores
             new_hyperparameters = base_hyperparameters.copy()
-            new_hyperparameters["PIME_PPO"].update(optimized_hyperparameters)
+            new_hyperparameters["PIME_PPO"].update(search_space)
             
             return new_hyperparameters
 
@@ -90,6 +93,33 @@ def run_optuna(
     study.optimize(objective_with_experiment, n_trials=n_trials, n_jobs=n_jobs) # n_trials=17*3*7=357 jobs=17
 
     print(f"Melhores hiperparâmetros encontrados: {study.best_params}")
+
+    # Load all directories names inside trial_logs_folder_path
+    base_dir = experiment["training_logs_folder_path"].format(id="")
+    folder_name = [
+        f 
+        for f in os.listdir(base_dir) 
+        if os.path.isdir(base_dir, f) 
+        and f"_{study.best_trial.number}" in f
+    ][0]
+
+    # Rename directory for better identification
+    os.rename(base_dir + folder_name, 
+              base_dir + folder_name + "_best")
+    
+
+    # Adds more info to be saved
+    study.best_params["optuna_hyperparams"] = {
+        "experiment_name": experiment["training_logs_folder_path"].split("/")[2],
+        "steps_to_run": steps_to_run,
+        "should_save_records": should_save_records,
+        "extra_record_only_pid": extra_record_only_pid,
+        "should_save_trained_model": should_save_trained_model,
+        "n_trials": n_trials,
+        "n_jobs": n_jobs,
+        "use_GPU": use_GPU
+    }
+    study.best_params["optuna_search_space"] = search_space
 
     # save best parameters
     create_dir_if_not_exists(experiment['best_results_folder_path'])
