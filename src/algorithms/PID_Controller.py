@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import control as ct
 from scipy.optimize import minimize
+import torch as pyTorch
 
 from enums.ErrorFormula import ErrorFormula
 
@@ -45,18 +46,19 @@ class PIDController:
         self.previous_error = 0
         self.integral = 0 # precisa ser guardado no self para ir acumulando a cada chamada de controle do pid
 
-        def _PID_formula(error):
+        def _PID_formula(error: float) -> float:
             self.integral += error * self.dt
             self.integral = np.clip(self.integral, self.min, self.max)
             derivative = (error - self.previous_error) / self.dt
             self.Kp * error + self.Ki * self.integral + self.Kd * derivative
 
-        def _PI_formula(error):
+        def _PI_formula(error: float) -> float:
+            assert not isinstance(error, pyTorch.Tensor), "error must be a float, not a pyTorch tensor."
             self.integral += error * self.dt
             self.integral = np.clip(self.integral, self.min, self.max)
             return self.Kp * error + self.Ki * self.integral
         
-        def _P_formula(error):
+        def _P_formula(error: float) -> float:
             return self.Kp * error
         
         map_type_to_formula = {
@@ -246,3 +248,65 @@ class PIDController:
 
         return pid_controller, {'optimized_Kp': optimized_Kp, 'optimized_Ki': optimized_Ki, 'optimized_Kd': optimized_Kd}
 
+
+
+class Batch_PIDController:
+    """
+    PID controller for a discrete-time state space model (dt = 1).
+    This controller is designed to receive optimized Kp, Ki, and Kd values.
+    Now supports batch processing of multiple errors using PyTorch tensors.
+    """
+    def __init__(
+            self, 
+            Kp, Ki, Kd, 
+            integrator_bounds: list[int, int],
+            dt=1,
+            error_formula: ErrorFormula | Callable[[float, float], float] = ErrorFormula.DIFFERENCE, 
+            controller_type: Literal["PID", "PI", "P"] = "PI",
+        ) -> None:
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.min = integrator_bounds[0]
+        self.max = integrator_bounds[1]
+        self.dt = dt
+        self.error_formula = error_formula
+
+        # Inicializar como tensor vazio, pois o tamanho do batch pode variar
+        self.previous_error = None
+        self.integral = None
+
+        def _PID_formula(error: pyTorch.Tensor) -> pyTorch.Tensor:
+            """PID formula for batch processing"""
+            self.integral += error * self.dt
+            self.integral = pyTorch.clamp(self.integral, self.min, self.max)
+            derivative = (error - self.previous_error) / self.dt
+            return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+
+        def _PI_formula(error: pyTorch.Tensor) -> pyTorch.Tensor:
+            """PI formula for batch processing"""
+            self.integral += error * self.dt
+            self.integral = pyTorch.clamp(self.integral, self.min, self.max)
+            return self.Kp * error + self.Ki * self.integral
+        
+        def _P_formula(error: pyTorch.Tensor) -> pyTorch.Tensor:
+            """P formula for batch processing"""
+            return self.Kp * error
+        
+        map_type_to_formula = {
+            "PID": _PID_formula,
+            "PI": _PI_formula,
+            "P": _P_formula
+        }
+        self.formula = map_type_to_formula[controller_type]
+
+    def __call__(self, error: pyTorch.Tensor) -> pyTorch.Tensor:
+        """Process batch of errors using the selected PID formula"""
+        if self.previous_error is None:
+            # Inicializar previous_error e integral no mesmo formato de error
+            self.previous_error = pyTorch.zeros_like(error)
+            self.integral = pyTorch.zeros_like(error)
+
+        output = self.formula(error)
+        self.previous_error = error.clone()  # Atualiza previous_error corretamente
+        return output

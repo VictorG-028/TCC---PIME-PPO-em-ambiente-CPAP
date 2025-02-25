@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
 from stable_baselines3.common.buffers import RolloutBuffer
+from stable_baselines3.common.distributions import DiagGaussianDistribution
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.utils import get_device
@@ -15,22 +16,20 @@ import torch as pyTorch
 import torch.nn.functional as torch_nn_functional
 import torch.nn as nn
 
-from algorithms.PID_Controller import PIDController
+from algorithms.PID_Controller import Batch_PIDController, PIDController
 from enums.TerminationRule import TerminationRule
 from enums.ErrorFormula import ErrorFormula
 from modules.EnsembleGenerator import EnsembleGenerator
 from save_file_utils import create_dir_if_not_exists
 from modules.Scheduller import Scheduller
 
-
-
 class CustomMLP_divided(nn.Module):
     def __init__(self, 
                  feature_dim: int,
-                 last_layer_dim_pi: int = 64,
-                 last_layer_dim_vf: int = 64,
+                 last_layer_dim_pi: int = 1,
+                 last_layer_dim_vf: int = 1,
                  neurons_per_layer: int = 6,
-                 activation_function_name: Literal["no activation", "relu", "tanh", "swish"] = "no activation",
+                 activation_function_name: Literal["no activation", "relu", "tanh", "swish"] = "no activation"
                  ):
         super().__init__()
 
@@ -43,6 +42,15 @@ class CustomMLP_divided(nn.Module):
         
         self.latent_dim_pi = last_layer_dim_pi
         self.latent_dim_vf = last_layer_dim_vf
+        # self.batch_prior_controller = Batch_PIDController(
+        #     Kp = 8.8, 
+        #     Ki = 0.015, 
+        #     Kd = 0, 
+        #     controller_type="PI",
+        #     integrator_bounds=(-25, 25),
+        #     dt=2 # sample_period
+        # )
+        # self.prior_controller = prior_controller
 
         # Create the same network arquitecture for policy and value networks
         self.policy_upper_net, self.policy_lower_net, self.policy_merged_net = \
@@ -134,6 +142,11 @@ class CustomMLP_divided(nn.Module):
 
     def forward_actor(self, input_vector: pyTorch.Tensor) -> pyTorch.Tensor:
         # print(f"[CustomMLP forward_actor] {input_vector=}")
+
+        # last_x_and_yRef_t = input_vector[:, -3:-1] # 2 valores antes do último
+        # x = last_x_and_yRef_t[:, 0]  # The x value (first column of last_x_and_yRef_t)
+        # y_ref = last_x_and_yRef_t[:, 1]  # The y_ref value (second column of last_x_and_yRef_t)
+        # error = y_ref - x  # error
         
         # Split input_vector
         x_values_and_yRef_t = input_vector[:, :-1] # Todos menos o último
@@ -143,7 +156,37 @@ class CustomMLP_divided(nn.Module):
         upper_tensor = self.policy_upper_net(x_values_and_yRef_t)
         lower_tensor = self.policy_lower_net(z_t)
         merged_tensor = pyTorch.cat((upper_tensor, lower_tensor), dim=1)
-        return self.policy_merged_net(merged_tensor)
+        policy_output = self.policy_merged_net(merged_tensor)
+
+        if (policy_output.size(dim=0) > 1):
+            print(f"@>@>@>@>@>({x_values_and_yRef_t=}, {z_t=})")
+            print(f"@>@>@>@>@>{upper_tensor=}")
+            print(f"@>@>@>@>@>{lower_tensor=}")
+            print(f"@>@>@>@>@>{merged_tensor=}")
+            # print(f"@>@>@>@>@>{policy_output=}")
+            for name, param in self.policy_upper_net.named_parameters():
+                print(name, param.data)  # Veja se há NaN ou valores muito grandes
+
+
+        # if (error.size(dim=0) > 1):
+        #     prior_value: pyTorch.Tensor = self.batch_prior_controller(error)
+        #     prior_value = prior_value.reshape((prior_value.size(dim=0), 1))
+        # else:
+        #     prior_value: float = self.prior_controller(error.item())
+        # prior_tensor = pyTorch.tensor(prior_value, dtype=policy_output.dtype, device=policy_output.device)
+        
+        # print(f"({input_vector=}")
+        # print(f"({error=}, {x=})")
+        # print(policy_output)
+        # print(prior_tensor)
+        # print(policy_output + prior_tensor)
+        # # input(">>>")
+        # print("tamanho do policy_output: ", policy_output.size())
+        # print("tamanho do prior_tensor: ", prior_tensor.size())
+        # print("tamanho da soma dos tensores: ", (policy_output + prior_tensor).size())
+        # input(">>>")
+        
+        return policy_output
 
 
     def forward_critic(self, input_vector: pyTorch.Tensor) -> pyTorch.Tensor:
@@ -251,6 +294,8 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
         self.__divide_neural_network = kwargs.pop("divide_neural_network")
         self.__neurons_per_layer = kwargs.pop("neurons_per_layer")
         self.__activation_function_name = kwargs.pop("activation_function_name")
+        self.__prior_controller = kwargs.pop("prior_controller")
+        self.__env = kwargs.pop("env")
 
         super().__init__(
             observation_space,
@@ -259,6 +304,20 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
             *args,
             **kwargs,
         )
+        # self.log_std = nn.Parameter(
+        #     pyTorch.ones(self.action_space.shape) * kwargs.get("log_std_init", np.log(0.5)),
+        #     requires_grad=False
+        # )
+
+    def _get_action_dist_from_latent(self, latent_pi):
+        mean_actions = self.action_net(latent_pi)
+        prior_output = self.__prior_controller(self.__env.unwrapped.error)
+
+        # out = self.action_dist.proba_distribution(mean_actions+prior_output, self.log_std)
+        # print(f"@@@ ({mean_actions=}, {self.log_std=}, {out.sample()=})")
+        print(f"@@@ {self.log_std=}, {mean_actions=}, {prior_output=}, {mean_actions + prior_output=}")
+        # input(">>>")
+        return self.action_dist.proba_distribution(mean_actions+prior_output, self.log_std)
 
     def _build_mlp_extractor(self) -> None:
         if self.__divide_neural_network:
@@ -394,14 +453,17 @@ class PIME_PPO:
                        # rollout_buffer_kwargs = {'buffer_size': self.buffer_size},
                        # buffer_size           = self.buffer_size,
                        # n_steps               = self.buffer_size,
-                       n_steps               = horizon,               # Number of steps to run for each environment per update
+                       n_steps               = horizon,              # Number of steps to run for each environment per update
                        learning_rate         = adam_stepsize,
                        batch_size            = minibatch_size,
                        n_epochs              = epochs,
                        policy_kwargs         = {
                             "divide_neural_network": divide_neural_network,
                             "neurons_per_layer": neurons_per_layer,
-                            "activation_function_name": activation_function_name
+                            "activation_function_name": activation_function_name,
+                            "prior_controller": self.pid_controller,
+                            # "log_std_init": np.log(2.0),
+                            "env": env,
                             }
                        )
         
@@ -425,7 +487,7 @@ class PIME_PPO:
 
         assert steps_to_run > 0, "steps_to_run must be greater than 0."
 
-        records = [] # (*x_vector, y_ref, z_t, PID_action, PPO_action, action, reward, error, steps_in_episode, is_start_episode)
+        records = [] # (*x_vector, y_ref, z_t, PID_action, PPO_action, action, reward, error, steps_in_episode)
         
         # steps_extra_info: list[tuple] = []
         steps_in_episode = 0
@@ -456,50 +518,66 @@ class PIME_PPO:
                 for j in range(self.episodes_per_sample):
                     sample_parameters = self.ensemble.generate_sample()
                     obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
-                    is_start_episode = True # Is true only before the first step/action is taken
                     done = False # done is updated by termination rule
+                    steps_in_episode = 0
                     episode_reward = 0
 
                     while not done:
 
-                        pi_action = self.pid_controller(self.env.unwrapped.error)
+                        # pi_action = self.pid_controller(self.env.unwrapped.error)
+                        pi_action = 0
 
-                        ppo_action, next_hidden_state = self.ppo.predict(obs)
-                        ppo_action = ppo_action.item()
+                        ppo_action, next_hidden_state = self.ppo.predict(obs) # Invoca forward_actor() do CustomMLP
+                        ppo_action: float = ppo_action.item()
 
-                        action = pi_action + ppo_action
-                        # action = pi_action + ppo_action * self.env.unwrapped.error
-                        # action = pi_action * ppo_action
+                        with pyTorch.no_grad():
+                            obs_tensor = pyTorch.tensor(obs, dtype=pyTorch.float32).unsqueeze(0)# .to(device)
+                            # sigma_theta_squared = policy_generated_distribution.distribution.scale.item() # Desvio padrão (variância ao quadrado) da política atual 
+
+                            # action = pi_action + ppo_action
+                            # action = pi_action + ppo_action * self.env.unwrapped.error
+                            # action = pi_action * ppo_action
+                            action = ppo_action
+                            # action = np.random.normal(pi_action + ppo_action, sigma_theta_squared)
+
+                            # Get value and log_prob
+                            # obs_tensor = pyTorch.tensor(obs, dtype=pyTorch.float32).unsqueeze(0)# .to(device)
+                            action_tensor = pyTorch.tensor([ppo_action], dtype=pyTorch.float32)# .to(device)
+
+                            value = self.ppo.policy.predict_values(obs_tensor) # Invoca forward_actor() do CustomMLP
+                            policy_generated_distribution: DiagGaussianDistribution = self.ppo.policy.get_distribution(obs_tensor)
+                            log_prob = policy_generated_distribution.log_prob(action_tensor)
+
+                            # mu = policy_generated_distribution.mean
+                            # sigma = policy_generated_distribution.distribution.stddev
+
+                            mu = self.ppo.policy.mlp_extractor.forward_actor(obs_tensor)
+                            log_std = self.ppo.policy.log_std
+                            sigma = pyTorch.exp(log_std)
+                            print(f"MU: {mu}, SIGMA: {sigma}")
+
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         steps_in_episode += 1
                         total_steps_counter += 1    
-                        episode_reward += reward      
-
-                        # Get value and log_prob
-                        obs_tensor = pyTorch.tensor(obs, dtype=pyTorch.float32).unsqueeze(0).to(device)
-                        action_tensor = pyTorch.tensor([ppo_action], dtype=pyTorch.float32).to(device)
-                        with pyTorch.no_grad():
-                            value = self.ppo.policy.predict_values(obs_tensor)
-                            policy_generated_distribution = self.ppo.policy.get_distribution(obs_tensor)
-                            log_prob = policy_generated_distribution.log_prob(action_tensor)
+                        episode_reward += reward 
+                        print(f"{action=} {next_obs=}")     
 
 
-                        self.ppo.rollout_buffer.add(obs, action, reward, is_start_episode, value, log_prob)
-                        records.append((*obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode, is_start_episode))
+                        self.ppo.rollout_buffer.add(obs, np.array(action, dtype=np.float64).reshape((1,-1)), reward, done, value, log_prob)
+                        records.append((*obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
-                        is_start_episode = False
 
                         # (branchless) Treina e reseta o buffer ao atingir `n_steps`
                         branchless_train_and_reset[
                             total_steps_counter % self.ppo.n_steps == 0
                         ]()
+                    # End of while loop / end of episode run ###################
 
-                    # Post episode execution
-                    # [uncomment] print(f"{steps_in_episode=}")
-                    steps_in_episode = 0
-                    last_episode_reward = episode_reward
+                    # [uncomment] print(f"last_steps_in_episode={steps_in_episode}")
+                    # [uncomment] last_steps_in_episode = steps_in_episode
+                    last_episode_reward = episode_reward # Show how well the trained model is performing
 
             # self.ppo.train()
             # self.ppo.rollout_buffer.reset()
@@ -525,7 +603,7 @@ class PIME_PPO:
             pd.DataFrame(
                 records, 
                 columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                        ["y_ref", "z_t", "PID_action", "PPO_action", "combined_action", "reward", "error", "steps_in_episode", "is_start_episode"]
+                        ["y_ref", "z_t", "PID_action", "PPO_action", "combined_action", "reward", "error", "steps_in_episode"]
             ).to_csv(
                 f"{self.logs_folder_path}/records.csv", 
                 index=False

@@ -32,7 +32,7 @@ experiments = {
                 "discount": 0.995,
                 "horizon": 200,
                 "adam_stepsize": 3e-4,
-                "minibatch_size": 128,
+                "minibatch_size": 256,
                 "epochs": 10,
                 "ensemble_size": 5,
                 "divide_neural_network": True,
@@ -44,15 +44,15 @@ experiments = {
                 "episodes_per_sample": 5,
 
                 # PID (ZN - kp=8.80 e ki=11.46)
-                "Kp": 8.8, 
+                "Kp": 5.8, 
                 "Ki": 0.015,
                 "Kd": 0,
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "ppo_action_bounds": (-1, 1),           # [V]
+                "ppo_action_bounds": (-10, 20),         # [V]
                 "ppo_observation_max_bounds": (10, 10), # [cm]
-                "pid_type": "P",
+                "pid_type": "PI",
             },
             ## Scheduller
             "set_points": [3, 6, 9, 4, 2], # [cm]
@@ -150,7 +150,7 @@ experiments = {
 ################################################################################
 
 
-with open("logs/terminal_outputs.tst", 'w') as f:
+with open("logs/terminal_outputs.txt", 'w') as f:
 
     sys.stdout = f
 
@@ -159,7 +159,7 @@ with open("logs/terminal_outputs.tst", 'w') as f:
         steps_to_run=400_000, 
         should_save_records=True,
         extra_record_only_pid=True,
-        should_save_trained_model=True,
+        should_save_trained_model=False,
         use_GPU=False
     )
 

@@ -245,8 +245,8 @@ class CpapEnv(BaseSetPointEnv):
         elif self.phase == 'pause':
 
             current_flow = 0
-            current_volume  = current_volume + (current_flow * dt)
-            current_pressure  = lung._r_aw * current_flow + current_volume / lung.c_rs + ventilator.peep # P = F x R  +  V x E  +  PEEP
+            current_volume = current_volume + (current_flow * dt)
+            current_pressure = lung._r_aw * current_flow + current_volume / lung.c_rs + ventilator.peep # P = F x R  +  V x E  +  PEEP
                 
             self.phase_counter += 1
             if (self.phase_counter >= ventilator.t_ip * f_s):

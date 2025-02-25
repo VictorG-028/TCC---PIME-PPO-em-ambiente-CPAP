@@ -149,9 +149,12 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         self.current_time = 0
 
 
-    # uncomment if needed
-    # def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
-    #     return super().reset(seed=seed, options=options)
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
+        super().reset(seed=seed, options=options)
+
+        self.observation["x1"] = 0
+        # self.observation["x2"] = 5.0
+        return self.observation, {}
 
 
     def simulation_model(self,
@@ -180,7 +183,10 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         - u_t -> Ação; Voltagem aplicada a bomba d'água; 
         - dt -> Intervalo de tempo; discretização de Euler do modelo;
         """
-
+        # print(u_t)
+        # print(type(u_t))
+        # print(dir(u_t))
+        # input(">>>")
         u_t = np.array([u_t, 0])
 
         t_out, y_out, x_out = ct.input_output_response(
