@@ -5,6 +5,7 @@ import gymnasium
 import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
+from stable_baselines3.common.distributions import DiagGaussianDistribution
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
@@ -27,8 +28,8 @@ from modules.Scheduller import Scheduller
 class CustomMLP_divided(nn.Module):
     def __init__(self, 
                  feature_dim: int,
-                 last_layer_dim_pi: int = 64,
-                 last_layer_dim_vf: int = 64,
+                 last_layer_dim_pi: int = 1,
+                 last_layer_dim_vf: int = 1,
                  neurons_per_layer: int = 6,
                  activation_function_name: Literal["no activation", "relu", "tanh", "swish"] = "no activation",
                  ):
@@ -394,7 +395,7 @@ class PIME_PPO:
                        # rollout_buffer_kwargs = {'buffer_size': self.buffer_size},
                        # buffer_size           = self.buffer_size,
                        # n_steps               = self.buffer_size,
-                       n_steps               = horizon,               # Number of steps to run for each environment per update
+                       n_steps               = horizon,              # Number of steps to run for each environment per update
                        learning_rate         = adam_stepsize,
                        batch_size            = minibatch_size,
                        n_epochs              = epochs,
@@ -425,7 +426,7 @@ class PIME_PPO:
 
         assert steps_to_run > 0, "steps_to_run must be greater than 0."
 
-        records = [] # (*x_vector, y_ref, z_t, PID_action, PPO_action, action, reward, error, steps_in_episode, is_start_episode)
+        records = [] # (*x_vector, y_ref, z_t, PID_action, PPO_action, action, reward, error, steps_in_episode)
         
         # steps_extra_info: list[tuple] = []
         steps_in_episode = 0
@@ -437,15 +438,12 @@ class PIME_PPO:
         iterations: int = math.ceil(steps_to_run / steps_per_iteration)
         # [uncomment] print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
-        # last_log = {}
-        def train_ppo() -> None:
-            # nonlocal last_log
+        def train_and_reset_ppo() -> None:
             self.ppo.train()
-            # last_log = self.ppo.logger.name_to_value,
             self.ppo.rollout_buffer.reset()
 
         branchless_train_and_reset = {
-            True: train_ppo,
+            True: train_and_reset_ppo,
             False: lambda: None
         }
         
@@ -456,8 +454,8 @@ class PIME_PPO:
                 for j in range(self.episodes_per_sample):
                     sample_parameters = self.ensemble.generate_sample()
                     obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
-                    is_start_episode = True # Is true only before the first step/action is taken
                     done = False # done is updated by termination rule
+                    steps_in_episode = 0
                     episode_reward = 0
 
                     while not done:
@@ -481,25 +479,25 @@ class PIME_PPO:
                         action_tensor = pyTorch.tensor([ppo_action], dtype=pyTorch.float32).to(device)
                         with pyTorch.no_grad():
                             value = self.ppo.policy.predict_values(obs_tensor)
-                            policy_generated_distribution = self.ppo.policy.get_distribution(obs_tensor)
-                            log_prob = policy_generated_distribution.log_prob(action_tensor)
+                            policy_distribution: DiagGaussianDistribution = self.ppo.policy.get_distribution(obs_tensor)
+                            log_prob = policy_distribution.log_prob(action_tensor)
 
 
-                        self.ppo.rollout_buffer.add(obs, action, reward, is_start_episode, value, log_prob)
-                        records.append((*obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode, is_start_episode))
+                        self.ppo.rollout_buffer.add(obs, action, reward, done, value, log_prob)
+                        records.append((*obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
-                        is_start_episode = False
+
 
                         # (branchless) Treina e reseta o buffer ao atingir `n_steps`
                         branchless_train_and_reset[
                             total_steps_counter % self.ppo.n_steps == 0
                         ]()
+                    # End of while loop / end of episode run ###################
 
-                    # Post episode execution
-                    # [uncomment] print(f"{steps_in_episode=}")
-                    steps_in_episode = 0
-                    last_episode_reward = episode_reward
+                    # [uncomment] print(f"last_steps_in_episode={steps_in_episode}")
+                    # [uncomment] last_steps_in_episode = steps_in_episode
+                    last_episode_reward = episode_reward # Show how well the trained model is performing
 
             # self.ppo.train()
             # self.ppo.rollout_buffer.reset()
@@ -525,7 +523,7 @@ class PIME_PPO:
             pd.DataFrame(
                 records, 
                 columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                        ["y_ref", "z_t", "PID_action", "PPO_action", "combined_action", "reward", "error", "steps_in_episode", "is_start_episode"]
+                        ["y_ref", "z_t", "PID_action", "PPO_action", "combined_action", "reward", "error", "steps_in_episode"]
             ).to_csv(
                 f"{self.logs_folder_path}/records.csv", 
                 index=False
