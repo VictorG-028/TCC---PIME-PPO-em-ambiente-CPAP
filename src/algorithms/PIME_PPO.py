@@ -470,6 +470,8 @@ class PIME_PPO:
                         # action = pi_action * ppo_action
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
+                        print(f"NEXT OBS @@@ {next_obs=} | {reward=} | {done=}")
+                        # input(">>>")
                         steps_in_episode += 1
                         total_steps_counter += 1    
                         episode_reward += reward      
@@ -483,16 +485,19 @@ class PIME_PPO:
                             log_prob = policy_distribution.log_prob(action_tensor)
 
 
-                        self.ppo.rollout_buffer.add(obs, action, reward, done, value, log_prob)
+                        # self.ppo.rollout_buffer.add(obs, action, reward, done, value, log_prob)
                         records.append((*obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
 
 
                         # (branchless) Treina e reseta o buffer ao atingir `n_steps`
-                        branchless_train_and_reset[
-                            total_steps_counter % self.ppo.n_steps == 0
-                        ]()
+                        # branchless_train_and_reset[
+                        #     total_steps_counter % self.ppo.n_steps == 0
+                        # ]()
+                        # if (total_steps_counter % self.ppo.n_steps == 0):
+                        #     train_and_reset_ppo()
+                            
                     # End of while loop / end of episode run ###################
 
                     # [uncomment] print(f"last_steps_in_episode={steps_in_episode}")

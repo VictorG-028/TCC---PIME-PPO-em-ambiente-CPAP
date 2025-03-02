@@ -181,18 +181,19 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
         - dt -> Intervalo de tempo; discretização de Euler do modelo;
         """
 
-        u_t = np.array([u_t, 0])
-
         t_out, y_out, x_out = ct.input_output_response(
             self.double_tank_system, 
             [self.current_time, self.current_time + dt], 
-            u_t, 
+            np.array([u_t, 0]), 
             [l1_t, l2_t], 
             return_x=True
         )
         l1_t, l2_t = x_out[:, -1]
 
         self.current_time += dt
+
+        print("aqui")
+        input(">>>")
 
         # Considera bomba d'água não reversível, isto é, (u_t < 0) tem o mesmo efeito que (u_t = 0)
         # u_t = max(0, u_t)

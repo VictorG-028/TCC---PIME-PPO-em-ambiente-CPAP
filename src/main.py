@@ -74,8 +74,9 @@ experiments = {
         'tracked_point': 'x2',
     },
     'CPAP': {
-        'create_env_function': CpapEnv.create_cpap_environment,
-        'logs_folder_path': "logs/ppo/CPAP/{start_date_time}",
+        "create_env_function": CpapEnv.create_cpap_environment,
+        "training_logs_folder_path": "logs/ppo/CPAP/trainings/{id}",
+        "best_results_folder_path": "logs/ppo/CPAP/best/",
 
         "hyperparameters": {
             "seed": 42,
@@ -91,57 +92,64 @@ experiments = {
                 "minibatch_size": 256,
                 "epochs": 10,
                 "ensemble_size": 2,
+                "divide_neural_network": True,
+                "neurons_per_layer": 6,
+                "activation_function_name": "no activation", # "no activation" "relu" "tanh"
 
                 ## PIME
                 "tracked_point_name": 'x3',
                 "episodes_per_sample": 5,
 
                 # PID
-                "Kp": 2.5,
-                "Ki": 0.030,
+                "Kp": 3.0,
+                "Ki": 0.0030,
                 "Kd": 0,
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "ppo_action_bounds": (0, 100),        # [cmH2O]
+                "ppo_action_bounds": (-1, 1),           # [v]
+                "ppo_observation_min_bounds": (10, 10), # [?]
+                "ppo_observation_max_bounds": (10, 10), # [?]
                 "pid_type": "PI",
             },
             ## Scheduller
-            "set_points": [5, 15, 10],
-            "intervals": [500, 500, 500],
+            "set_points": [3, 12, 5, 7, 5], # pressure [cmH2O]
+            "intervals": [50, 50, 50, 50, 50], # [s]
 
-            ## Model Ensemble # TODO encontrar distribuições diferentes de "constant" para esses parâmetros
             "distributions": {
-                # Pacient (not used)
-                "rp": ("constant", {"constant": 10e-3}),
-                "c": ("constant", {"constant": 50}),
-                "rl": ("constant", {"constant": 48.5 * 60 / 1000}),
+                # Blower (saída de fluxo volumétrico [cm³/s])
+                # "tb": ("uniform", {"low": 8e-3, "high": 1.2e-2}),  # [s]
+                # "kb": ("uniform", {"low": 0.4, "high": 0.6}),      # [cm³/s/V]
 
-                # Blower (not used)
-                "tb": ("constant", {"constant":  10e-3}),
-                "kb": ("constant", {"constant": 0.5}),
+                # # Lung (parâmetros pulmonares)
+                # "r_aw": ("uniform", {"low": 2, "high": 5}),        # [cmH2O / L / s] - resistência normal: 2 a 5
+                # "c_rs": ("uniform", {"low": 85, "high": 100}),     # [ml / cmH2O] - complacência normal: 85 a 100
+
+                # # Ventilator (parâmetros do ventilador)
+                # "v_t": ("uniform", {"low": 300, "high": 400}),     # [ml] - volume corrente: 300 a 400 ml
+                # "peep": ("uniform", {"low": 4, "high": 6}),        # [cmH2O] - pressão expiratória: 4 a 6 cmH2O
+                # "rr": ("uniform", {"low": 10, "high": 20}),        # [min^-1] - frequência respiratória: 10 a 20 respirações/min
+                # "t_i": ("uniform", {"low": 0.8, "high": 1.2}),     # [s] - tempo inspiratório: 0.8 a 1.2 s
+                # "t_ip": ("uniform", {"low": 0.2, "high": 0.3}),    # [s] - pausa inspiratória: 0.2 a 0.3 s
+
+                # Blower
+                "tb": ("constant", {"constant": 7.0}),
+                "kb": ("constant", {"constant": 0.05}),
 
                 # Lung
                 "r_aw": ("constant", {"constant": 3}),
-                # "_r_aw": ("constant", {"constant": 3 / 1000}),
                 "c_rs": ("constant", {"constant": 60}),
 
                 # Ventilator
                 "v_t": ("constant", {"constant": 350}),
-                "peep": ("constant", {"constant": 5}),
+                # "peep": ("constant", {"constant": 1}),
                 "rr": ("constant", {"constant": 15}),
                 "t_i": ("constant", {"constant": 1}),
                 "t_ip": ("constant", {"constant": 0.25}),
 
-                # Calculated inside Ventilator with above variables (not needed)
-                # "_rr": ("constant", {"constant": 15 / 60}),
-                # "t_c": ("constant", {"constant": 1 / (15 / 60)}),
-                # "t_e": ("constant", {"constant": (1 / (15 / 60)) - 1 - 0.25}),
-                # "_f_i": ("constant", {"constant": 350 / 1}),
-
                 # Model constants
-                "f_s": ("constant", {"constant": 30}),    # [Hz]
-                "dt": ("constant", {"constant": 1/30}),   # [s]
+                "f_s": ("constant", {"constant": 30}),             # [Hz] - frequência de amostragem
+                "dt": ("constant", {"constant": 1/30}),            # [s] 1/30
             }
         },
     },
@@ -150,16 +158,16 @@ experiments = {
 ################################################################################
 
 
-with open("logs/terminal_outputs.tst", 'w') as f:
+with open("./terminal_outputs.txt", 'w') as f:
 
     sys.stdout = f
 
     run_training(
-        experiments["double_water_tank"], 
-        steps_to_run=400_000, 
+        experiments["CPAP"], 
+        steps_to_run=250, 
         should_save_records=True,
         extra_record_only_pid=True,
-        should_save_trained_model=True,
+        should_save_trained_model=False,
         use_GPU=False
     )
 

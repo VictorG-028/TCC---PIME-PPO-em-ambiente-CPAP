@@ -18,6 +18,11 @@ from gymnasium import spaces
 
 class Lung:
     def __init__(self, r_aw=3, c_rs=60):
+        """
+        r_aw [cmH2O / l / s] \\
+        _r_aw [cmH2O / ml / s] \\
+        c_rs [ml / cmH2O]
+        """
         # Normal range: 2 to 5 cmH2O/L/s
         # Airway resistance [cmH2O / l / s]
         self.r_aw = r_aw
@@ -29,15 +34,28 @@ class Lung:
         # Respiratory system compliance [ml / cmH2O]
         self.c_rs = c_rs
 
+        self._rc = self._r_aw * c_rs
+
 
 class Ventilator:
-    def __init__(self, v_t=350, peep=5, rr=15, t_i=1, t_ip=0.25):
+    def __init__(self, v_t=350, u_t = 0, kb=1.0, tb=1.0, dt=1/30, rr=15, t_i=1, t_ip=0.25):
+        """
+        v_t [ml] \\
+        peep [cmH2O] \\
+        rr [min^(-1)] \\
+        _rr [Hz] \\
+        t_i [s] \\
+        t_ip [s] \\
+        t_c [s] \\
+        t_e [s] \\
+        _f_i [ml / s]
+        """
 
         # Tidal volume [ml]
         self.v_t = v_t
         
         # Positive End Expiratory Pressure [cmH2O]
-        self.peep = peep
+        self.peep = kb * u_t * (1 - np.exp(-dt / tb))
 
         # Normal range: 10 to 20 min^(-1)
         # Respiratory rate [min^(-1)]
@@ -56,17 +74,18 @@ class Ventilator:
         self.t_c = 1 / self._rr
 
         # Expiratory Time [s]
-        self.t_e = self.t_c - self.t_i  - self.t_ip
+        self.t_e = self.t_c - self.t_i - self.t_ip
 
         # Inspiratory flow [ml / s]
         self._f_i = self.v_t / (self.t_i)
 
 
-class SimulationState(TypedDict):
-    i: int # 0,1,2,3... nunca zera e serve de índice para acessar arrays
-    phase_counter: int # Contador que zera ao trocar phase
-    phase: Literal["exhale", "inhale", "pause"]
-    start_phase_time: float
+# Currently not used
+# class SimulationState(TypedDict):
+#     i: int # 0,1,2,3... nunca zera e serve de índice para acessar arrays
+#     phase_counter: int # Contador que zera ao trocar phase
+#     phase: Literal["exhale", "inhale", "pause"]
+#     start_phase_time: float
 
 
 
@@ -145,22 +164,26 @@ class CpapEnv(BaseSetPointEnv):
         # Lembrar: Modificar vetor x aqui implica em modificar o retorno do simulation model e o reset do env
         # Definindo o espaço de observações (flow [l / min], volume [ml], pressure [cmH2O])
         self.observation_space = spaces.Dict({
-            "x1": spaces.Box(low=-100, high=100, shape=(1,), dtype=np.float64),  # flow (valores low/high extremo considerando fluxo de ar negativo/positivo durante expiração forçada)
-            "x2": spaces.Box(low=0, high=8000, shape=(1,), dtype=np.float64),    # volume (8000 ml é a capacidade pulmonar total máxima para adultos, considerando casos extremos)
-            "x3": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),    # pressure (-20 é um valor extremo durante expiração e 60 é um valor extremo durante ventilação mecânica)
-            # "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),  # last pressure
-            # "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de inspiração
-            # "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de expiração
-            # "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa
-            # "x8": self.action_space,                                           # last action taken
-            "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),   # set point pressure (60 é valor extremo durante ventilação mecânica)
-            "z_t": spaces.Box(low=0, high=float('inf'), shape=(1,), dtype=np.float64)  # Acumulador de erro
+            "x1": spaces.Box(low=-1700, high=350, shape=(1,), dtype=np.float64),  # flow [ml /s] (valores low/high extremo considerando fluxo de ar negativo/positivo durante expiração forçada)
+            "x2": spaces.Box(low=0, high=400, shape=(1,), dtype=np.float64),     # volume [ml] (400 ml é a quantidade de ar inserido pelo CPAP)
+            "x3": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),    # pressure [cmH2O] (-20 é um valor extremo durante expiração e 60 é um valor extremo durante ventilação mecânica)
+            # "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),  # last pressure [cmH2O]
+            # "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de inspiração [0 ou 1]
+            # "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de expiração [0 ou 1]
+            # "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa [0 ou 1]
+            # "x8": self.action_space,                                           # last action taken [-1 até +1]
+            "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),   # set point pressure [cmH2O] (60 é valor extremo durante ventilação mecânica)
+            "z_t": spaces.Box(low=0, high=25, shape=(1,), dtype=np.float64)      # Acumulador de erro [cmH2O]
         })
 
     
     # Wrapper x_vector inicialization to apply a especial rule to this environment
     def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
         obs, _ = super().reset(seed, options)
+
+        obs["x1"] = 5
+        obs["x2"] = 0
+        obs["x3"] = 0
 
         is_positive = obs["x1"] > 0
         is_negative = obs["x1"] < 0
@@ -178,30 +201,50 @@ class CpapEnv(BaseSetPointEnv):
             (False, False, True): "pause"
         }
 
-        # Reset accordinly to x vector Internal state of simulation model
+        # Reset accordinly to x vector private state of simulation model
         self.i = 0
         self.phase_counter = 1
         self.phase = map_x1_to_phase[(is_positive, is_negative, is_zero)]
         self.start_phase_time = 0
+        self.phase = "exhale"
 
+        # print(f"reset foi invocado e resultou na {obs=}")
+        # input(">>>")
         return obs, _
 
     
     def simulation_model(self,
                          u_t,                                            # action
                          current_flow, current_volume, current_pressure, # x vector
-                         /, *, 
-                         rp, c, rl,                # Pacient    # Generated by ensemble
+                         /, *,
                          tb, kb,                   # Blower     # Generated by ensemble
                          r_aw, c_rs,               # Lung       # Generated by ensemble
-                         v_t, peep, rr, t_i, t_ip, # Ventilator # Generated by ensemble
+                         v_t, rr, t_i, t_ip,       # Ventilator # Generated by ensemble
                          dt, f_s,                               # Constants generated by ensemble
                         ) -> dict[str, float]:
-        last_pressure = current_pressure
+        """ 
+        u_t -> action [V] \\
+        current_flow [ml / s], current_volume [ml], current_pressure [cmH2O] \\
+        \\
+        tb -> blower constant time [s] \\
+        kb -> blower gain  (ml / s / V) \\
+        \\
+        r_aw -> airway resistance [cmH2O / L / s] \\
+        c_rs -> respiratory system compliance [ml / cmH2O] \\
+        \\
+        v_t -> tidal volume [ml] \\
+        peep -> positive end expiratory pressure [cmH2O] \\
+        rr -> respiratory rate [min^(-1)] \\
+        t_i -> inspiratory time [s] \\
+        t_ip -> inspiratory pause time [s] \\
+        \\
+        dt -> sample time [s] \\
+        f_s -> sample frequency [Hz]
+        """
 
         lung = Lung(r_aw, c_rs)
-        ventilator = Ventilator(v_t, peep, rr, t_i, t_ip)
-        
+        ventilator = Ventilator(v_t, u_t, kb, dt, tb, rr, t_i, t_ip)
+        ventilator.peep = 5
 
         if self.phase == 'exhale':
             current_time = self.i * dt
@@ -209,14 +252,16 @@ class CpapEnv(BaseSetPointEnv):
             if self.phase_counter == 0:
                 self.start_phase_time = current_time
 
-            current_flow = CpapEnv._expiratory_flow(lung, 
-                                                    ventilator, 
-                                                    current_pressure, 
-                                                    self.start_phase_time, 
-                                                    current_time
-                                                    )
+            elapsed_phase_time = current_time - self.start_phase_time
+
+            temp = np.exp(-elapsed_phase_time / lung._rc)
+            if temp < 0.01:
+                temp = 0
+            current_flow = ((ventilator.peep - current_pressure) / lung._r_aw) * temp
+            print(f"current_flow @@@ {current_time=} | {self.start_phase_time=} | {np.exp(-elapsed_phase_time / lung._rc)=} | {temp=} | {current_flow=}")
                         
-            current_volume = current_volume + current_flow * dt
+            current_volume = max(current_volume + current_flow * dt, 0)
+            
 
             current_pressure = current_flow * lung._r_aw + current_volume / lung.c_rs + ventilator.peep
 
@@ -228,10 +273,10 @@ class CpapEnv(BaseSetPointEnv):
 
         elif self.phase == 'inhale':
 
-            current_flow = ventilator._f_i
+            current_flow = ventilator._f_i * (0.001 + 0.05 * u_t)
 
             if self.i > 0:
-                current_volume = current_volume + (current_flow * dt)
+                current_volume = max(current_volume + current_flow * dt, 0)
             else:
                 current_volume = 0
 
@@ -245,19 +290,20 @@ class CpapEnv(BaseSetPointEnv):
         elif self.phase == 'pause':
 
             current_flow = 0
-            current_volume  = current_volume + (current_flow * dt)
+            current_volume  = max(current_volume + current_flow * dt, 0)
             current_pressure  = lung._r_aw * current_flow + current_volume / lung.c_rs + ventilator.peep # P = F x R  +  V x E  +  PEEP
                 
             self.phase_counter += 1
             if (self.phase_counter >= ventilator.t_ip * f_s):
                 self.phase = 'exhale'
                 self.phase_counter = 1
-        
-        current_flow = current_flow * 60 / 1000 # Converte [l / min] para [ml / s]
 
         self.i += 1
+        print(f"STEP @@@ {u_t=} @@@ {self.i=} | {self.phase=} | {current_flow=} | {current_volume=} | {current_pressure=} | {ventilator.t_ip * f_s=} | {self.phase_counter=}")
+        # input(">>>")
 
         # Lembrar: Modificar vetor x aqui implica em modificar o observation space no __init__ e o reset desse env
+        current_pressure = np.clip(current_pressure, -20, 20)
         return {
             "x1": current_flow,                   # Fluxo de ar atual
             "x2": current_volume,                 # Volume de ar atual
@@ -271,10 +317,21 @@ class CpapEnv(BaseSetPointEnv):
     
 
     @staticmethod
-    def _expiratory_flow(lung, ventilator, last_pressuse, start_time, current_time):
+    def _expiratory_flow(lung, ventilator, last_pressure, start_time, current_time, blower_flow):
+        """
+        _t [s] \\
+        _rc [s] = [cmH2O / ml / s] * [ml / cmH2O] \\
+        np.exp(-_t / _rc) [Adimensional] \\
+        passive_flow [ml / s] = [cmH2O] / [cmH2O / ml / s]
+        """
         _t = current_time - start_time
         _rc = lung._r_aw * lung.c_rs
-        return (ventilator.peep - last_pressuse) / lung._r_aw * np.exp(-_t / _rc)
+        temp = np.exp(-_t / _rc)
+        if temp < 0.01:
+            temp = 0
+        passive_flow = ((blower_flow - last_pressure) / lung._r_aw) * temp
+        print(f" _expiratoryFloy @@@ {current_time=} | {start_time=} | {np.exp(-_t / _rc)=} | {temp=} | {passive_flow=}")
+        return passive_flow
     
 
     @staticmethod
@@ -283,7 +340,9 @@ class CpapEnv(BaseSetPointEnv):
                                 intervals: list[float] = [500, 500, 500],
                                 distributions: dict[str, tuple[str, dict[str, float]]] = None,
                                 integrator_bounds: tuple[float, float] = (-25, 25),
-                                action_bounds: tuple[float, float] = (0, 100),
+                                ppo_action_bounds: tuple[float, float] = (-1, 1),
+                                ppo_observation_min_bounds: tuple[float, float] = (10, 10),
+                                ppo_observation_max_bounds: tuple[float, float] = (10, 10),
                                 pid_type: Literal["PID", "PI", "P"] = "PI",
                                 ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
@@ -297,7 +356,6 @@ class CpapEnv(BaseSetPointEnv):
             Unidade de medida: [cmH2O/ml/s]
             Inspiratory Resistance. Resistência Inspiratória.
             Representa a resistência ao fluxo de ar durante a inspiração.
-            Originally [cmH2O/L/s].
         rl
             Unidade de medida: [cmH2O/ml/s]
             Leak Resistance. Resistência a vazamentos.
@@ -341,66 +399,67 @@ class CpapEnv(BaseSetPointEnv):
                         x_size                 = 3,
                         x_start_points         = None,
                         tracked_point          = 'x3',
-                        termination_rule       = TerminationRule.MAX_STEPS,
+                        termination_rule       = TerminationRule.INTERVALS,
                         error_formula          = ErrorFormula.DIFFERENCE,
                         reward_formula         = RewardFormula.DIFFERENCE_SQUARED,
                         integrator_clip_bounds = integrator_bounds,
-                        action_bounds          = action_bounds,
+                        action_bounds          = ppo_action_bounds,
                         )
         env = DictToArrayWrapper(env)
 
-        # Define model symbols
-        s = sp.symbols('s')
-        tb, kb = sp.symbols('tb kb')
-        rp, rl, c = sp.symbols('rp rl c')
-        # kp, ki, kd = sp.symbols('kp ki kd') # Not used
+        # # Define model symbols
+        # s = sp.symbols('s')
+        # tb, kb = sp.symbols('tb kb')
+        # rp, rl, c = sp.symbols('rp rl c')
+        # # kp, ki, kd = sp.symbols('kp ki kd') # Not used
 
-        # Define model values
-        patient = {
-            # hh: Heated Humidifier.
-            # hme: Heat-and-moisture exchanger.
-            'Heated Humidifier, Normal':             {'rp': 10e-3, 'c': 50, 'rl': 48.5 * 60 / 1000 },
-            'Heated Humidifier, COPD':               {'rp': 20e-3, 'c': 60, 'rl': 48.5 * 60 / 1000 },
-            'Heated Humidifier, mild ARDS':          {'rp': 10e-3, 'c': 45, 'rl': 48.5 * 60 / 1000 },
-            'Heated Humidifier, moderate ARDS':      {'rp': 10e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
-            'Heated Humidifier, severe ARDS':        {'rp': 10e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
-            'Heat Moisture Exchange, Normal':        {'rp': 15e-3, 'c': 50, 'rl': 48.5 * 60 / 1000 },
-            'Heat Moisture Exchange, COPD':          {'rp': 25e-3, 'c': 60, 'rl': 48.5 * 60 / 1000 },
-            'Heat Moisture Exchange, mild ARDS':     {'rp': 15e-3, 'c': 45, 'rl': 48.5 * 60 / 1000 },
-            'Heat Moisture Exchange, moderate ARDS': {'rp': 15e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
-            'Heat Moisture Exchange, severe ARDS':   {'rp': 15e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
-        }
-        _rp, _c, _rl =  10e-3, 50, 48.5 * 60 / 1000
-        _tb = 10e-3
-        _kb = 0.5
+        # # Define model values
+        # patient = {
+        #     # hh: Heated Humidifier.
+        #     # hme: Heat-and-moisture exchanger.
+        #     'Heated Humidifier, Normal':             {'rp': 10e-3, 'c': 50, 'rl': 48.5 * 60 / 1000 },
+        #     'Heated Humidifier, COPD':               {'rp': 20e-3, 'c': 60, 'rl': 48.5 * 60 / 1000 },
+        #     'Heated Humidifier, mild ARDS':          {'rp': 10e-3, 'c': 45, 'rl': 48.5 * 60 / 1000 },
+        #     'Heated Humidifier, moderate ARDS':      {'rp': 10e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
+        #     'Heated Humidifier, severe ARDS':        {'rp': 10e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
+        #     'Heat Moisture Exchange, Normal':        {'rp': 15e-3, 'c': 50, 'rl': 48.5 * 60 / 1000 },
+        #     'Heat Moisture Exchange, COPD':          {'rp': 25e-3, 'c': 60, 'rl': 48.5 * 60 / 1000 },
+        #     'Heat Moisture Exchange, mild ARDS':     {'rp': 15e-3, 'c': 45, 'rl': 48.5 * 60 / 1000 },
+        #     'Heat Moisture Exchange, moderate ARDS': {'rp': 15e-3, 'c': 40, 'rl': 48.5 * 60 / 1000 },
+        #     'Heat Moisture Exchange, severe ARDS':   {'rp': 15e-3, 'c': 35, 'rl': 48.5 * 60 / 1000 },
+        # }
+        # _rp, _c, _rl =  10e-3, 50, 48.5 * 60 / 1000
+        # _tb = 10e-3
+        # _kb = 0.5
 
-        # Define cpap model
-        blower_model = kb / (s + 1 / tb)
-        blower_model = sp.collect(blower_model, s)
-        patient_model = (rl + rp * rl * c * s) / (1 + (rp+ rl) * c * s)
-        patient_model = sp.collect(patient_model, s)
-        cpap_model = blower_model * patient_model
-        numerators, denominators = sp.fraction(cpap_model)
-        numerators = sp.Poly(numerators, s)
-        denominators = sp.Poly(denominators, s)
-        numerators = numerators.all_coeffs()  # Tranfer function numerator.
-        denominators = denominators.all_coeffs()  # Tranfer function denominator.
+        # # Define cpap model
+        # blower_model = kb / (s + 1 / tb)
+        # blower_model = sp.collect(blower_model, s)
+        # patient_model = (rl + rp * rl * c * s) / (1 + (rp+ rl) * c * s)
+        # patient_model = sp.collect(patient_model, s)
+        # cpap_model = blower_model * patient_model
+        # numerators, denominators = sp.fraction(cpap_model)
+        # numerators = sp.Poly(numerators, s)
+        # denominators = sp.Poly(denominators, s)
+        # numerators = numerators.all_coeffs()  # Tranfer function numerator.
+        # denominators = denominators.all_coeffs()  # Tranfer function denominator.
 
-        filled_numerators = list()
-        filled_denominators = list()
-        for numerator_coef, denominator_coef in zip(numerators, denominators):
-            filled_numerators.append(numerator_coef.evalf(subs=dict(zip( (c, rp, tb, kb, rl), (_c, _rp, _tb, _kb, _rl) ))))
-            filled_denominators.append(denominator_coef.evalf(subs=dict(zip( (c, rp, tb, kb, rl), (_c, _rp, _tb, _kb, _rl) ))))
-        filled_numerators = np.array(filled_numerators, dtype=np.float64)
-        filled_denominators = np.array(filled_denominators, dtype=np.float64)
+        # filled_numerators = list()
+        # filled_denominators = list()
+        # for numerator_coef, denominator_coef in zip(numerators, denominators):
+        #     filled_numerators.append(numerator_coef.evalf(subs=dict(zip( (c, rp, tb, kb, rl), (_c, _rp, _tb, _kb, _rl) ))))
+        #     filled_denominators.append(denominator_coef.evalf(subs=dict(zip( (c, rp, tb, kb, rl), (_c, _rp, _tb, _kb, _rl) ))))
+        # filled_numerators = np.array(filled_numerators, dtype=np.float64)
+        # filled_denominators = np.array(filled_denominators, dtype=np.float64)
 
-        cpap_model = ct.TransferFunction(filled_numerators, filled_denominators)
+        # cpap_model = ct.TransferFunction(filled_numerators, filled_denominators)
 
-        # Train the PID controller
-        trained_pid, pid_optimized_params = PIDController.train_pid_controller(
-            cpap_model, 
-            pid_training_method='BFGS',
-            pid_type=pid_type,
-        )
+        # # Train the PID controller
+        # trained_pid, pid_optimized_params = PIDController.train_pid_controller(
+        #     cpap_model, 
+        #     pid_training_method='BFGS',
+        #     pid_type=pid_type,
+        # )
+        trained_pid, pid_optimized_params = None, None
 
         return env, scheduller, ensemble, trained_pid, pid_optimized_params
