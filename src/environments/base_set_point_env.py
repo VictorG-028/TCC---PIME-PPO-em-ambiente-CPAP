@@ -234,8 +234,8 @@ class BaseSetPointEnv(gymnasium.Env):
             "y_ref": self.setpoint,
             "z_t": 0
         }
-        self.error = self.error_formula(x_values[self.tracked_point], self.setpoint)
-        self.reward = -self.error
+        self.error = self.error_formula(y_ref=self.setpoint, y=x_values[self.tracked_point])
+        self.reward = self.reward_formula(y_ref=self.setpoint, y=x_values[self.tracked_point])
         self.done = False
         self.truncated = {}
 
@@ -246,7 +246,7 @@ class BaseSetPointEnv(gymnasium.Env):
 
     # [uncomment] @debug_print_extra_info
     def step(self, action: np.float64):
-        set_point: np.float64 = self.scheduller.get_set_point_at(step=self.timestep)
+        self.setpoint: np.float64 = self.scheduller.get_set_point_at(step=self.timestep)
         # print(f"{action=}")
         # print(f"x_vector={list(self.observation.values())[0:-2]}")
         # print(f"y_ref={list(self.observation.values())[-2]}")
@@ -257,16 +257,20 @@ class BaseSetPointEnv(gymnasium.Env):
             *list(self.observation.values())[0:-2], # Get only x1 .. xn values; don't use y_ref and z_t (last 2 values)
             **self.ensemble_params
         )
+        # print(f"{x_vector=}")
+        # input(">>>")
 
         # NOTE: self.error is passed to PID with env.unwrapped.error
-        self.error = self.error_formula(y_ref=set_point, y=x_vector[self.tracked_point])
-        self.reward = self.reward_formula(y_ref=set_point, y=x_vector[self.tracked_point])
+        self.error = self.error_formula(y_ref=self.setpoint, y=x_vector[self.tracked_point])
+        self.reward = self.reward_formula(y_ref=self.setpoint, y=x_vector[self.tracked_point])
         self.cummulative_error = self.next_cummulative_error(self.error)
         self.observation = {
             **x_vector,
-            "y_ref": set_point,
+            "y_ref": self.setpoint,
             "z_t": self.cummulative_error,
         }
+        # print(f"{self.observation=}")
+        # input(">>>")
 
         self.timestep += 1 # Timestep should be updated before termination rule
         self.done = self.termination_rule(self.timestep, self.scheduller.intervals_sum, self.max_step)

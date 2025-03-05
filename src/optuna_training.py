@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import os
+from time import sleep
 
 import optuna
 from functools import partial
@@ -29,6 +30,32 @@ def run_optuna(
                                             ) -> dict[str, any]:
             
             global search_space
+            
+            # water tank
+            # search_space = {
+            #     "Kp": trial.suggest_float("Kp", 0.1, 10.0, step=0.1),   # 100 opções
+            #     "Ki": trial.suggest_float("Ki", 0.001, 0.100, step=0.001), # 100 opções
+            #     "ensemble_size": 1,
+            #     "episodes_per_sample": 1
+            # }
+            # search_space = {
+            #     "vf_coef": trial.suggest_float("vf_coef", 0.01, 10.0, log=True),
+            #     "horizon": trial.suggest_int("horizon", 200, 2000, step=200),
+            #     "minibatch_size": trial.suggest_categorical("minibatch_size", [32, 64, 128, 256]),
+            #     "adam_stepsize": trial.suggest_float("adam_stepsize", 1e-5, 3e-4, log=True),
+            #     "neurons_per_layer": trial.suggest_int("neurons_per_layer", 6, 60, step=6),
+            #     "divide_neural_network": trial.suggest_categorical("divide_neural_network", [True, False]),
+            #     "activation_function_name": trial.suggest_categorical("activation_function_name", ["no activation", "relu", "tanh"]),
+            #     "ensemble_size": 1,
+            # }
+
+            # CPAP
+            # search_space = {
+            #     "Kp": trial.suggest_float("Kp", 0.1, 10.0, step=0.1),   # 100 opções
+            #     "Ki": trial.suggest_float("Ki", 0.01, 10.0, step=0.01), # 1000 opções
+            #     "ensemble_size": 1,
+            #     "episodes_per_sample": 1
+            # }
             search_space = {
                 "vf_coef": trial.suggest_float("vf_coef", 0.01, 10.0, log=True),
                 "horizon": trial.suggest_int("horizon", 200, 2000, step=200),
@@ -38,6 +65,12 @@ def run_optuna(
                 "divide_neural_network": trial.suggest_categorical("divide_neural_network", [True, False]),
                 "activation_function_name": trial.suggest_categorical("activation_function_name", ["no activation", "relu", "tanh"]),
                 "ensemble_size": 1,
+            }
+            search_space = {
+                "Kp": 8.8, # trial.suggest_float("Kp", 0.1, 10.0, step=0.1),   # 100 opções
+                "Ki": 11.46, #trial.suggest_float("Ki", 0.01, 10.0, step=0.01), # 1000 opções
+                "ensemble_size": 1,
+                "episodes_per_sample": 1
             }
 
             # Atualiza os hiperparâmetros do experimento com os espaços de possíveis valores
@@ -95,22 +128,23 @@ def run_optuna(
     print(f"Melhores hiperparâmetros encontrados: {study.best_params}")
 
     # Load all directories names inside trial_logs_folder_path
-    base_dir = experiment["training_logs_folder_path"].format(id="")
-    folder_name = [
-        f 
-        for f in os.listdir(base_dir) 
-        if os.path.isdir(base_dir, f) 
-        and f"_{study.best_trial.number}" in f
-    ][0]
+    base_dir = experiment["training_logs_folder_path"].format(id="") # logs/ppo/CPAP/trainings/{id}
+
+    best_folder_name = None
+    for f in os.listdir(base_dir):
+        if os.path.isdir(f"{base_dir}/{f}") and f"_{study.best_trial.number}" in f:
+            best_folder_name = f
+            break
+    assert best_folder_name is not None, f"Folder with best trial number {study.best_trial.number} not found."
 
     # Rename directory for better identification
-    os.rename(base_dir + folder_name, 
-              base_dir + folder_name + "_best")
+    os.rename(base_dir + best_folder_name, 
+              base_dir + best_folder_name + "_best")
     
 
     # Adds more info to be saved
     study.best_params["optuna_hyperparams"] = {
-        "experiment_name": experiment["training_logs_folder_path"].split("/")[2],
+        "experiment_name": experiment["training_logs_folder_path"].split("/")[2], # CPAP or double_water_tank
         "steps_to_run": steps_to_run,
         "should_save_records": should_save_records,
         "extra_record_only_pid": extra_record_only_pid,

@@ -15,71 +15,6 @@ import gymnasium
 from gymnasium import spaces
 
 
-
-class Lung:
-    def __init__(self, r_aw=3, c_rs=60):
-        """
-        r_aw [cmH2O / l / s] \\
-        _r_aw [cmH2O / ml / s] \\
-        c_rs [ml / cmH2O]
-        """
-        # Normal range: 2 to 5 cmH2O/L/s
-        # Airway resistance [cmH2O / l / s]
-        self.r_aw = r_aw
-
-        # Converted airway resistance = _r_aw = r_aw [cmH2O / l / s] / [1000 ml / l] = [cmH2O / ml / s]
-        self._r_aw = r_aw / 1000
-
-        # Normal range: 85 to 100 ml/cmH2O
-        # Respiratory system compliance [ml / cmH2O]
-        self.c_rs = c_rs
-
-        self._rc = self._r_aw * c_rs
-
-
-class Ventilator:
-    def __init__(self, v_t=350, u_t = 0, kb=1.0, tb=1.0, dt=1/30, rr=15, t_i=1, t_ip=0.25):
-        """
-        v_t [ml] \\
-        peep [cmH2O] \\
-        rr [min^(-1)] \\
-        _rr [Hz] \\
-        t_i [s] \\
-        t_ip [s] \\
-        t_c [s] \\
-        t_e [s] \\
-        _f_i [ml / s]
-        """
-
-        # Tidal volume [ml]
-        self.v_t = v_t
-        
-        # Positive End Expiratory Pressure [cmH2O]
-        self.peep = kb * u_t * (1 - np.exp(-dt / tb))
-
-        # Normal range: 10 to 20 min^(-1)
-        # Respiratory rate [min^(-1)]
-        self.rr = rr
-
-        # Converted Respiratory rate = _rr = rr * [min / 60 s] = rr / 60 [s^(-1)] = rr / 60 [Hz]
-        self._rr = rr / 60
-
-        # Inspiratory Time [s]
-        self.t_i = t_i
-
-        # Inspiratory pause time [s]
-        self.t_ip = t_ip
-        
-        # Cicle time = 1 / _rr [s]
-        self.t_c = 1 / self._rr
-
-        # Expiratory Time [s]
-        self.t_e = self.t_c - self.t_i - self.t_ip
-
-        # Inspiratory flow [ml / s]
-        self._f_i = self.v_t / (self.t_i)
-
-
 # Currently not used
 # class SimulationState(TypedDict):
 #     i: int # 0,1,2,3... nunca zera e serve de índice para acessar arrays
@@ -107,7 +42,7 @@ class CpapEnv(BaseSetPointEnv):
             # Base class parameters
             scheduller: Scheduller,
             ensemble_params: dict[str, np.float64],
-            x_size: int = 2,
+            x_size: int = 3,
             x_start_points: Optional[list[np.float64]] = None,
             termination_rule: TerminationRule | Callable = TerminationRule.MAX_STEPS,
             error_formula: ErrorFormula | Callable = ErrorFormula.DIFFERENCE,
@@ -119,7 +54,7 @@ class CpapEnv(BaseSetPointEnv):
 
             # Created parameters
             action_bounds: tuple[float, float] = (0, 100), # [cmH2O]
-            max_step: int = 30, # simulation_time [s]
+            max_step: int = 30000, # simulation_time [s]
             sample_frequency: int = 1000, # [Hz]
             ):
         
@@ -167,11 +102,11 @@ class CpapEnv(BaseSetPointEnv):
             "x1": spaces.Box(low=-1700, high=350, shape=(1,), dtype=np.float64),  # flow [ml /s] (valores low/high extremo considerando fluxo de ar negativo/positivo durante expiração forçada)
             "x2": spaces.Box(low=0, high=400, shape=(1,), dtype=np.float64),     # volume [ml] (400 ml é a quantidade de ar inserido pelo CPAP)
             "x3": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),    # pressure [cmH2O] (-20 é um valor extremo durante expiração e 60 é um valor extremo durante ventilação mecânica)
-            # "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),  # last pressure [cmH2O]
-            # "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de inspiração [0 ou 1]
-            # "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de expiração [0 ou 1]
-            # "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa [0 ou 1]
-            # "x8": self.action_space,                                           # last action taken [-1 até +1]
+            "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),  # last pressure [cmH2O]
+            "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de inspiração [0 ou 1]
+            "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de expiração [0 ou 1]
+            "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa [0 ou 1]
+            "x8": self.action_space,                                           # last action taken [-1 até +1]
             "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),   # set point pressure [cmH2O] (60 é valor extremo durante ventilação mecânica)
             "z_t": spaces.Box(low=0, high=25, shape=(1,), dtype=np.float64)      # Acumulador de erro [cmH2O]
         })
@@ -181,7 +116,7 @@ class CpapEnv(BaseSetPointEnv):
     def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
         obs, _ = super().reset(seed, options)
 
-        obs["x1"] = 5
+        obs["x1"] = 0
         obs["x2"] = 0
         obs["x3"] = 0
 
@@ -189,11 +124,11 @@ class CpapEnv(BaseSetPointEnv):
         is_negative = obs["x1"] < 0
         is_zero = obs["x1"] == 0
 
-        # obs["x4"] = 0 # Consider last pressure as 0
-        # obs["x5"] = int(is_positive)
-        # obs["x6"] = int(is_negative)
-        # obs["x7"] = int(is_zero)
-        # obs["x8"] = 0 # Consider last action as no volt applyed
+        obs["x4"] = 0 # Consider last pressure as 0
+        obs["x5"] = int(is_positive)
+        obs["x6"] = int(is_negative)
+        obs["x7"] = int(is_zero)
+        obs["x8"] = 0 # Consider last action as no volt applyed
 
         map_x1_to_phase = {
             (True, False, False): "inhale",
@@ -202,35 +137,106 @@ class CpapEnv(BaseSetPointEnv):
         }
 
         # Reset accordinly to x vector private state of simulation model
+        self.error = self.error_formula(y_ref=self.setpoint, y=obs[self.tracked_point])
+        self.reward = self.reward_formula(y_ref=self.setpoint, y=obs[self.tracked_point])
         self.i = 0
         self.phase_counter = 1
-        self.phase = map_x1_to_phase[(is_positive, is_negative, is_zero)]
+        self.phase = "exhale" # map_x1_to_phase[(is_positive, is_negative, is_zero)]
         self.start_phase_time = 0
-        self.phase = "exhale"
+        self.last_pause_pressure = 5 # deve ser igual ao peep quando não existe a última pressão da pausa
+        self.stop = False
+        self.control_filtered = 0
 
         # print(f"reset foi invocado e resultou na {obs=}")
         # input(">>>")
         return obs, _
 
     
+    class Lung:
+        def __init__(self, r_aw=3, c_rs=60):
+            """
+            r_aw [cmH2O / l / s] \\
+            _r_aw [cmH2O / ml / s] \\
+            c_rs [ml / cmH2O]
+            """
+            # Normal range: 2 to 5 cmH2O/L/s
+            # Airway resistance [cmH2O / l / s]
+            self.r_aw = r_aw
+
+            # Converted airway resistance = _r_aw = r_aw [cmH2O / l / s] / [1000 ml / l] = [cmH2O / ml / s]
+            self._r_aw = r_aw / 1000
+
+            # Normal range: 85 to 100 ml/cmH2O
+            # Respiratory system compliance [ml / cmH2O]
+            self.c_rs = c_rs
+
+            self._rc = self._r_aw * c_rs
+
+
+    class Ventilator:
+        def __init__(self, v_t=350, u_t = 0, kb=1.0, tb=1.0, dt=1/30, rr=15, t_i=1, t_ip=0.25):
+            """
+            v_t [ml] \\
+            peep [cmH2O] \\
+            rr [min^(-1)] \\
+            _rr [Hz] \\
+            t_i [s] \\
+            t_ip [s] \\
+            t_c [s] \\
+            t_e [s] \\
+            _f_i [ml / s]
+            """
+
+            # Tidal volume [ml]
+            self.v_t = v_t
+            
+            # Positive End Expiratory Pressure [cmH2O]
+            self.peep = kb * u_t * (1 - np.exp(-dt / tb))
+
+            # Normal range: 10 to 20 min^(-1)
+            # Respiratory rate [min^(-1)]
+            self.rr = rr
+
+            # Converted Respiratory rate = _rr = rr * [min / 60 s] = rr / 60 [s^(-1)] = rr / 60 [Hz]
+            self._rr = rr / 60
+
+            # Inspiratory Time [s]
+            self.t_i = t_i
+
+            # Inspiratory pause time [s]
+            self.t_ip = t_ip
+            
+            # Cicle time = 1 / _rr [s]
+            self.t_c = 1 / self._rr
+
+            # Expiratory Time [s]
+            self.t_e = self.t_c - self.t_i - self.t_ip
+
+            # Inspiratory flow [ml / s]
+            self._f_i = self.v_t / (self.t_i)
+
+
     def simulation_model(self,
                          u_t,                                            # action
                          current_flow, current_volume, current_pressure, # x vector
+                         last_pressure, was_exhale, was_inhale, was_pause, last_action,
                          /, *,
-                         tb, kb,                   # Blower     # Generated by ensemble
-                         r_aw, c_rs,               # Lung       # Generated by ensemble
-                         v_t, rr, t_i, t_ip,       # Ventilator # Generated by ensemble
-                         dt, f_s,                               # Constants generated by ensemble
+                         r_aw, c_rs,                            # Lung       # Generated by ensemble
+                         tv, kv, v_t, rr, t_i, t_ip,            # Ventilator # Generated by ensemble
+                         dt, f_s,                               # Discretization constants
                         ) -> dict[str, float]:
         """ 
         u_t -> action [V] \\
-        current_flow [ml / s], current_volume [ml], current_pressure [cmH2O] \\
+        current_flow [ml / s], \\
+        current_volume [ml], \\
+        current_pressure [cmH2O] \\
         \\
-        tb -> blower constant time [s] \\
-        kb -> blower gain  (ml / s / V) \\
+        tv -> ventilator constant time [s] \\
+        kv -> ventilator gain [ml / s / V] \\
         \\
         r_aw -> airway resistance [cmH2O / L / s] \\
         c_rs -> respiratory system compliance [ml / cmH2O] \\
+        _rc -> _r_aw * c_rs
         \\
         v_t -> tidal volume [ml] \\
         peep -> positive end expiratory pressure [cmH2O] \\
@@ -241,29 +247,52 @@ class CpapEnv(BaseSetPointEnv):
         dt -> sample time [s] \\
         f_s -> sample frequency [Hz]
         """
+        exhale_sigma = 10.0
+        inhale_sigma = 10.0
+        pause_sigma = 10.0
 
-        lung = Lung(r_aw, c_rs)
-        ventilator = Ventilator(v_t, u_t, kb, dt, tb, rr, t_i, t_ip)
-        ventilator.peep = 5
+        # Parâmetros do filtro
+        tau_f = 0.1        # constante de tempo do filtro (em segundos)
+        alpha = dt / tau_f # ganho do filtro
+        # K_corr = 1.0       # Ganho de correção para converter a ação filtrada em pressão (cmH2O/V)
 
+
+        current_time = self.i * dt
+
+        lung = CpapEnv.Lung(r_aw, c_rs)
+        ventilator = CpapEnv.Ventilator(v_t, self.setpoint+u_t, kv, tv, self.phase_counter * dt, rr, t_i, t_ip)
+        
+        # FIltro de passa baixa (low-pass)
+        self.control_filtered = self.control_filtered + alpha * (ventilator.peep - self.control_filtered)
+
+        # Converter a ação filtrada em um ajuste para o PEEP
+        # ventilator.peep =  K_corr * self.control_filtered
+        ventilator.peep = self.control_filtered
+
+        last_pressure = current_pressure
+        
         if self.phase == 'exhale':
-            current_time = self.i * dt
-
-            if self.phase_counter == 0:
-                self.start_phase_time = current_time
-
-            elapsed_phase_time = current_time - self.start_phase_time
-
-            temp = np.exp(-elapsed_phase_time / lung._rc)
-            if temp < 0.01:
-                temp = 0
-            current_flow = ((ventilator.peep - current_pressure) / lung._r_aw) * temp
-            print(f"current_flow @@@ {current_time=} | {self.start_phase_time=} | {np.exp(-elapsed_phase_time / lung._rc)=} | {temp=} | {current_flow=}")
-                        
-            current_volume = max(current_volume + current_flow * dt, 0)
             
+            if self.phase_counter == 1:
+                self.start_phase_time = current_time
+                if (self.i == 0):
+                    self.last_pause_pressure = ventilator.peep
 
+            # if self.i == 4998:
+            #     pass
+
+            exhale_noise = np.random.normal(0, exhale_sigma)
+            elapsed_phase_time = current_time - self.start_phase_time
+            current_flow = (ventilator.peep - self.last_pause_pressure) / lung._r_aw * np.exp(-elapsed_phase_time / lung._rc) + exhale_noise
+            # print(f"current_flow @@@ {current_time=} | {self.start_phase_time=} | {np.exp(-elapsed_phase_time / lung._rc)=} | {temp=} | {current_flow=}")
+                        
+            current_volume = current_volume + current_flow * dt
+            
             current_pressure = current_flow * lung._r_aw + current_volume / lung.c_rs + ventilator.peep
+            # self.last_pause_pressure = current_pressure
+            # if (self.stop):
+            #     self.stop = False
+            print(f"action @@@ {u_t=} | {ventilator.peep=} | {self.last_pause_pressure=} | {elapsed_phase_time=}")
 
             self.phase_counter += 1
             if (self.phase_counter >= ventilator.t_e * f_s):
@@ -272,11 +301,12 @@ class CpapEnv(BaseSetPointEnv):
 
 
         elif self.phase == 'inhale':
-
-            current_flow = ventilator._f_i * (0.001 + 0.05 * u_t)
+            
+            pause_noise = np.random.normal(0, inhale_sigma)
+            current_flow = ventilator._f_i + pause_noise
 
             if self.i > 0:
-                current_volume = max(current_volume + current_flow * dt, 0)
+                current_volume = current_volume + current_flow * dt
             else:
                 current_volume = 0
 
@@ -288,31 +318,35 @@ class CpapEnv(BaseSetPointEnv):
                 self.phase_counter = 1
 
         elif self.phase == 'pause':
-
-            current_flow = 0
-            current_volume  = max(current_volume + current_flow * dt, 0)
-            current_pressure  = lung._r_aw * current_flow + current_volume / lung.c_rs + ventilator.peep # P = F x R  +  V x E  +  PEEP
+            
+            pause_noise = np.random.normal(0, pause_sigma)
+            current_flow = pause_noise
+            current_volume = current_volume + current_flow * dt
+            current_pressure  = lung._r_aw * current_flow + current_volume / lung.c_rs + ventilator.peep
                 
             self.phase_counter += 1
             if (self.phase_counter >= ventilator.t_ip * f_s):
                 self.phase = 'exhale'
                 self.phase_counter = 1
+                self.last_pause_pressure = current_pressure
+                # print(current_pressure)
+                # self.stop = True
 
         self.i += 1
-        print(f"STEP @@@ {u_t=} @@@ {self.i=} | {self.phase=} | {current_flow=} | {current_volume=} | {current_pressure=} | {ventilator.t_ip * f_s=} | {self.phase_counter=}")
+        # print(f"STEP @@@ {u_t=} {ventilator.peep=} {self.last_pause_pressure=} @@@ {self.i=} | {self.phase=} | {current_flow=} | {current_volume=} | {current_pressure=} | {ventilator.t_ip * f_s=} | {self.phase_counter=}")
         # input(">>>")
 
-        # Lembrar: Modificar vetor x aqui implica em modificar o observation space no __init__ e o reset desse env
-        current_pressure = np.clip(current_pressure, -20, 20)
+        # Lembrar: Modificar vetor x de simulation_model implica em modificar o x_size no create_cpap_environment, o observation space no __init__ e o reset desse env
+        current_pressure = np.clip(current_pressure, -14, 14)
         return {
             "x1": current_flow,                   # Fluxo de ar atual
             "x2": current_volume,                 # Volume de ar atual
             "x3": current_pressure,               # Pressão de ar atual
-            # "x4": last_pressure,                # Pressão anterior a atual
-            # "x5": int(self.phase == 'inhale'),  # Flag de inspiração
-            # "x6": int(self.phase == 'exhale'),  # Flag de expiração
-            # "x7": int(self.phase == 'pause'),   # Flag de pausa
-            # "x8": u_t,                          # last action taken
+            "x4": last_pressure,                # Pressão anterior a atual
+            "x5": int(self.phase == 'inhale'),  # Flag de inspiração
+            "x6": int(self.phase == 'exhale'),  # Flag de expiração
+            "x7": int(self.phase == 'pause'),   # Flag de pausa
+            "x8": u_t,                          # last action taken
         }
     
 
@@ -336,14 +370,15 @@ class CpapEnv(BaseSetPointEnv):
 
     @staticmethod
     def create_cpap_environment(seed = 42,
-                                set_points: list[float] =  [5, 15, 10],
-                                intervals: list[float] = [500, 500, 500],
+                                set_points: list[float] =  [6, 9, 7],
+                                intervals: list[float] = [5000, 5000, 5000],
                                 distributions: dict[str, tuple[str, dict[str, float]]] = None,
                                 integrator_bounds: tuple[float, float] = (-25, 25),
                                 ppo_action_bounds: tuple[float, float] = (-1, 1),
-                                ppo_observation_min_bounds: tuple[float, float] = (10, 10),
-                                ppo_observation_max_bounds: tuple[float, float] = (10, 10),
+                                ppo_observation_min_bounds: tuple[float, float] = (-np.inf, -np.inf, -14),
+                                ppo_observation_max_bounds: tuple[float, float] = (np.inf, np.inf, 14),
                                 pid_type: Literal["PID", "PI", "P"] = "PI",
+                                max_step: int = 30_000,
                                 ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
 
@@ -396,14 +431,15 @@ class CpapEnv(BaseSetPointEnv):
         env = gymnasium.make("CpapEnv-V0", 
                         scheduller             = scheduller,
                         ensemble_params        = ensemble.generate_sample(),
-                        x_size                 = 3,
+                        x_size                 = 3+5,
                         x_start_points         = None,
                         tracked_point          = 'x3',
-                        termination_rule       = TerminationRule.INTERVALS,
+                        termination_rule       = TerminationRule.MAX_STEPS,
                         error_formula          = ErrorFormula.DIFFERENCE,
                         reward_formula         = RewardFormula.DIFFERENCE_SQUARED,
                         integrator_clip_bounds = integrator_bounds,
                         action_bounds          = ppo_action_bounds,
+                        max_step               = max_step,  
                         )
         env = DictToArrayWrapper(env)
 

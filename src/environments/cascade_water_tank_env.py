@@ -192,9 +192,6 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
 
         self.current_time += dt
 
-        print("aqui")
-        input(">>>")
-
         # Considera bomba d'água não reversível, isto é, (u_t < 0) tem o mesmo efeito que (u_t = 0)
         # u_t = max(0, u_t)
         
@@ -224,6 +221,7 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
                                       },
                                       integrator_bounds: tuple[float, float] = (-25, 25),
                                       ppo_action_bounds: tuple[float, float] = (0, 1),
+                                      ppo_observation_min_bounds: tuple[float, float] = (0, 0),
                                       ppo_observation_max_bounds: tuple[float, float] = (10, 10),
                                       pid_type: Literal["PID", "PI", "P"] = "PI",
                                       ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:

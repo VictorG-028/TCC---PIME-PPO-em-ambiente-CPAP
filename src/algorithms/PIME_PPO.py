@@ -446,7 +446,7 @@ class PIME_PPO:
             True: train_and_reset_ppo,
             False: lambda: None
         }
-        
+
         for iteration in range(1, iterations+1):
 
             for m in range(self.ensemble_size):
@@ -454,6 +454,7 @@ class PIME_PPO:
                 for j in range(self.episodes_per_sample):
                     sample_parameters = self.ensemble.generate_sample()
                     obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
+                    print(f"reset OBS @@@ {obs=} | {self.env.unwrapped.error=}")
                     done = False # done is updated by termination rule
                     steps_in_episode = 0
                     episode_reward = 0
@@ -465,12 +466,12 @@ class PIME_PPO:
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
                         ppo_action = ppo_action.item()
 
-                        action = pi_action + ppo_action
+                        action = pi_action #  + ppo_action
                         # action = pi_action + ppo_action * self.env.unwrapped.error
                         # action = pi_action * ppo_action
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
-                        print(f"NEXT OBS @@@ {next_obs=} | {reward=} | {done=}")
+                        print(f"NEXT OBS @@@ {next_obs=} | {self.env.unwrapped.error=}")
                         # input(">>>")
                         steps_in_episode += 1
                         total_steps_counter += 1    
@@ -486,7 +487,7 @@ class PIME_PPO:
 
 
                         # self.ppo.rollout_buffer.add(obs, action, reward, done, value, log_prob)
-                        records.append((*obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
+                        records.append((*next_obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
 
@@ -562,15 +563,16 @@ class PIME_PPO:
         return last_episode_reward
 
 
-    def record_pid_episode(self, sample_parameters: dict[str, float | int | np.ndarray]) -> None:
+    def record_pid_episode(self, sample_parameters: dict[str, float | int | np.ndarray], logs_folder_path: Optional[str] = None) -> None:
         """
         Records the PID controller response in a single episode and saves it in a csv file.
         """
+        if logs_folder_path is not None:
+            create_dir_if_not_exists(logs_folder_path)
         records = []
         done = False
         steps_in_episode = 0
         obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
-
         # execute 1 episode
         while not done:
             pi_action = self.pid_controller(self.env.unwrapped.error)
