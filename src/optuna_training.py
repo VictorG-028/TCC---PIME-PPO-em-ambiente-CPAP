@@ -39,6 +39,12 @@ def run_optuna(
             #     "episodes_per_sample": 1
             # }
             # search_space = {
+            #     "Kp": 8.8,
+            #     "Ki": 11.46,
+            #     "ensemble_size": 1,
+            #     "episodes_per_sample": 1
+            # }
+            # search_space = {
             #     "vf_coef": trial.suggest_float("vf_coef", 0.01, 10.0, log=True),
             #     "horizon": trial.suggest_int("horizon", 200, 2000, step=200),
             #     "minibatch_size": trial.suggest_categorical("minibatch_size", [32, 64, 128, 256]),
@@ -65,12 +71,7 @@ def run_optuna(
                 "divide_neural_network": trial.suggest_categorical("divide_neural_network", [True, False]),
                 "activation_function_name": trial.suggest_categorical("activation_function_name", ["no activation", "relu", "tanh"]),
                 "ensemble_size": 1,
-            }
-            search_space = {
-                "Kp": 8.8, # trial.suggest_float("Kp", 0.1, 10.0, step=0.1),   # 100 opções
-                "Ki": 11.46, #trial.suggest_float("Ki", 0.01, 10.0, step=0.01), # 1000 opções
-                "ensemble_size": 1,
-                "episodes_per_sample": 1
+                "episodes_per_sample": 5
             }
 
             # Atualiza os hiperparâmetros do experimento com os espaços de possíveis valores

@@ -466,7 +466,9 @@ class PIME_PPO:
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
                         ppo_action = ppo_action.item()
 
-                        action = pi_action #  + ppo_action
+                        action = pi_action + ppo_action
+
+                        # Other possible combinations
                         # action = pi_action + ppo_action * self.env.unwrapped.error
                         # action = pi_action * ppo_action
 
@@ -491,13 +493,10 @@ class PIME_PPO:
 
                         obs = next_obs # Can update obs after storing in buffer
 
-
                         # (branchless) Treina e reseta o buffer ao atingir `n_steps`
                         # branchless_train_and_reset[
                         #     total_steps_counter % self.ppo.n_steps == 0
                         # ]()
-                        # if (total_steps_counter % self.ppo.n_steps == 0):
-                        #     train_and_reset_ppo()
                             
                     # End of while loop / end of episode run ###################
 

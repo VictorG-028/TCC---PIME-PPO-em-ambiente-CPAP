@@ -78,7 +78,7 @@ experiments = {
     },
     'CPAP': {
         "create_env_function": CpapEnv.create_cpap_environment,
-        "training_logs_folder_path": "logs/ppo/CPAP/trainings/{id}",
+        "training_logs_folder_path": "logs/ppo/CPAP/optuna_trainings_final/{id}",
         "best_results_folder_path": "logs/ppo/CPAP/best/",
 
         "hyperparameters": {
@@ -96,7 +96,7 @@ experiments = {
                 "epochs": 10,
                 "ensemble_size": 5,
                 "divide_neural_network": True,
-                "neurons_per_layer": 18,
+                "neurons_per_layer": 42,
                 "activation_function_name": "no activation", # "no activation" "relu" "tanh"
 
                 ## PIME
@@ -104,54 +104,59 @@ experiments = {
                 "episodes_per_sample": 5,
 
                 # PID
-                "Kp": 1.0,
-                "Ki": 0.000,
+                "Kp": 100.0,
+                "Ki": 9.2,
                 "Kd": 0,
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "ppo_action_bounds": (-10, 10),         # [v]
+                "ppo_action_bounds": (-20, 20),         # [v]
                 "ppo_observation_min_bounds": (-np.inf, -np.inf, -14), # [ml/s, ml^3, cmH2O]
                 "ppo_observation_max_bounds": (np.inf, np.inf, 14), # [ml/s, ml^3, cmH2O]
                 "pid_type": "PI",
-                "max_step": 15_000,
+                "max_step": 10_000,
+                # "max_step": 15_000,
             },
             ## Scheduller
-            # "set_points": [3, 12, 5, 7, 5], # pressure [cmH2O]
-            # "intervals": [2000, 2000, 2000, 2000, 2000], # [s]
-            "set_points": [6, 9, 7], # pressure [cmH2O]
-            "intervals": [5000, 5000, 5000], # [s]
+            "set_points": [3, 12, 5, 7, 5], # pressure [cmH2O]
+            "intervals": [2000, 2000, 2000, 2000, 2000], # [s]
+            # "set_points": [7, 9, 5], # pressure [cmH2O]
+            # "intervals": [5000, 5000, 5000], # [s]
 
             "distributions": {
-                # Blower (saída de fluxo volumétrico [cm³/s])
 
-                # # Lung (parâmetros pulmonares)
-                # "r_aw": ("uniform", {"low": 2, "high": 5}),        # [cmH2O / L / s] - resistência normal: 2 a 5
-                # "c_rs": ("uniform", {"low": 35, "high": 60}),      # [ml / cmH2O] - complacência normal: 85 a 100
+                # Lung (parâmetros pulmonares)
+                "r_aw": ("uniform", {"low": 2, "high": 5}),        # [cmH2O / L / s] - resistência normal: 2 a 5
+                "c_rs": ("uniform", {"low": 35, "high": 60}),      # [ml / cmH2O] - complacência normal: 85 a 100
 
-                # # Ventilator (parâmetros do ventilador)
-                # "kv": ("constant", {"constant": 0.99}),            # [cm³/s/V]
-                # "tv": ("constant", {"constant": 0.01}),            # [s]
-                # "v_t": ("uniform", {"low": 300, "high": 400}),     # [ml] - volume corrente: 300 a 400 ml
-                # "rr": ("uniform", {"low": 10, "high": 20}),        # [min^-1] - frequência respiratória: 10 a 20 respirações/min
-                # "t_i": ("uniform", {"low": 0.8, "high": 1.2}),     # [s] - tempo inspiratório: 0.8 a 1.2 s
-                # "t_ip": ("uniform", {"low": 0.1, "high": 0.3}),    # [s] - pausa inspiratória: 0.2 a 0.3 s
+                # Ventilator (parâmetros do ventilador)
+                "kv": ("constant", {"constant": 0.99}),            # [cm³/s/V]
+                "tv": ("constant", {"constant": 0.01}),            # [s]
+                
+                # Pacient
+                "v_t": ("uniform", {"low": 300, "high": 400}),     # [ml] - volume corrente: 300 a 400 ml
+                "rr": ("uniform", {"low": 10, "high": 20}),        # [min^-1] - frequência respiratória: 10 a 20 respirações/min
+                "t_i": ("uniform", {"low": 0.8, "high": 1.2}),     # [s] - tempo inspiratório: 0.8 a 1.2 s
+                "t_ip": ("uniform", {"low": 0.1, "high": 0.3}),    # [s] - pausa inspiratória: 0.2 a 0.3 s
 
-                # Lung
-                "r_aw": ("constant", {"constant": 3}),
-                "c_rs": ("constant", {"constant": 60}),
-
-                # Ventilator
-                "kv": ("constant", {"constant": 0.99}),
-                "tv": ("constant", {"constant": 0.01}),
-                "v_t": ("constant", {"constant": 350}),
-                "rr": ("constant", {"constant": 15}),
-                "t_i": ("constant", {"constant": 1.0}),
-                "t_ip": ("constant", {"constant": 0.25}),
-
+                # Filtro de passa baixa
+                "tau_f": ("constant", {"constant": 0.1}),         # [s] - constante de tempo do filtro de passa baixa
+                
                 # Model constants
-                "f_s": ("constant", {"constant": 1000}),             # [Hz] - frequência de amostragem
-                "dt": ("constant", {"constant": 1/1000}),            # [s] 1/1000
+                "f_s": ("constant", {"constant": 1000}),           # [Hz] - frequência de amostragem
+                "dt": ("constant", {"constant": 1/1000}),          # [s] 1/1000
+
+                # # Lung
+                # "r_aw": ("constant", {"constant": 3}),
+                # "c_rs": ("constant", {"constant": 60}),
+
+                # # Ventilator
+                # "kv": ("constant", {"constant": 0.99}),
+                # "tv": ("constant", {"constant": 0.01}),
+                # "v_t": ("constant", {"constant": 350}),
+                # "rr": ("constant", {"constant": 15}),
+                # "t_i": ("constant", {"constant": 1.0}),
+                # "t_ip": ("constant", {"constant": 0.25}),
             }
         },
     },
@@ -166,23 +171,38 @@ with open("./terminal_outputs.txt", 'w') as f:
 
     # run_training(
     #     experiments["CPAP"], 
-    #     steps_to_run=15_000, 
+    #     steps_to_run=90_000, 
     #     should_save_records=True,
     #     extra_record_only_pid=False,
     #     should_save_trained_model=False,
     #     use_GPU=False
     # )
-
+    import time
+    start_time = time.time()
     run_optuna(
-        experiments["double_water_tank"], 
-        steps_to_run=2_000,# 15_000, 
+        experiments["CPAP"], 
+        steps_to_run=400_000, # 2_000, # 15_000,
         should_save_records=True,
         extra_record_only_pid=False,
         should_save_trained_model=False,
-        n_trials=1,#17*20, 
-        n_jobs=1,#17, 
+        n_trials=17*2,
+        n_jobs=17,
         use_GPU=False
     )
+    end_time = time.time()
+    print(f"{start_time=}")
+    print(f"{end_time=}")
+    print(f"Tempo de execução: {end_time - start_time} segundos")
+    # run_optuna(
+    #     experiments["CPAP"], 
+    #     steps_to_run=400_000, # 2_000, # 15_000,
+    #     should_save_records=True,
+    #     extra_record_only_pid=False,
+    #     should_save_trained_model=False,
+    #     n_trials=17*10,
+    #     n_jobs=17,
+    #     use_GPU=False
+    # )
 
     sys.stdout = sys.__stdout__
 
