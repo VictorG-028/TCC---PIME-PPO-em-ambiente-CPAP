@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from algorithms.PIME_PPO import PIME_PPO
+from algorithms.PIME_DDPG import PIME_DDPG
 from save_file_utils import save_hyperparameters_as_json
 
 
@@ -35,20 +35,21 @@ def run_training(
         experiment
     )
 
-    pime_ppo_controller = PIME_PPO(
-        env, 
-        scheduller, 
-        ensemble, 
-        **hyperparameters["PIME_PPO"],
+    controller = PIME_DDPG(
+        env,
+        scheduller,
+        ensemble,
+        **hyperparameters["PIME_TD3_DDPG"],
         use_GPU=use_GPU,
         logs_folder_path=training_logs_folder_path,
         integrator_bounds=hyperparameters["PID_and_Env"]["integrator_bounds"],
+        agent_action_bounds=hyperparameters["PID_and_Env"]["ppo_action_bounds"],
         pid_type=hyperparameters["PID_and_Env"]["pid_type"],
         sample_period=hyperparameters["distributions"]["dt"][1]["constant"],
         seed=hyperparameters["seed"]
     )
 
-    score = pime_ppo_controller.train(
+    score = controller.train(
         steps_to_run=steps_to_run, 
         extra_record_only_pid=extra_record_only_pid,
         should_save_records=should_save_records,

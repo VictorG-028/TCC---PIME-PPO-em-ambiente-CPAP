@@ -7,6 +7,78 @@ from scipy.optimize import minimize
 
 from enums.ErrorFormula import ErrorFormula
 
+import torch
+import torch.nn as nn
+
+class Batch_PIDController(nn.Module):
+    """
+    PID Controller para tensores em batch de entrada, compatível com PyTorch.
+    """
+    def __init__(self, Kp, Ki, Kd, integrator_bounds=(-25, 25), dt=1.0, controller_type="PI"):
+        super(Batch_PIDController, self).__init__()
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.min = integrator_bounds[0]
+        self.max = integrator_bounds[1]
+        self.dt = dt
+
+        # Inicializa estados para batch
+        self.register_buffer("integral", torch.zeros(1))  # Para acumular integral
+        self.register_buffer("previous_error", torch.zeros(1))  # Para armazenar erro anterior
+        # self.integral = torch.zeros(1)
+        # self.previous_error = torch.zeros(1)
+
+        # Seleciona a equação correta
+        formulas = {
+            "PID": self._PID_formula,
+            "PI": self._PI_formula,
+            "P": self._P_formula
+        }
+        self.formula = formulas[controller_type]
+
+    def _PID_formula(self, error):
+        self.integral = torch.clamp(self.integral.detach() + error, self.min, self.max)
+        derivative = (error - self.previous_error) / self.dt
+        return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+
+    def _PI_formula(self, error):
+        self.integral = torch.clamp(self.integral.detach() + error, self.min, self.max)
+        return self.Kp * error + self.Ki * self.integral
+
+    def _P_formula(self, error):
+        return self.Kp * error
+    
+    def reset(self):
+        """
+        Reseta os estados internos do controlador (integral e erro anterior).
+        """
+        self.integral.zero_()
+        self.previous_error.zero_()
+
+    def forward(self, error: torch.Tensor) -> torch.Tensor:
+        """
+        Calcula a saída do controlador PID para um batch de erros.
+
+        Parâmetros:
+        - error (Tensor): Tensor de erro no formato (batch_size, 1)
+
+        Retorno:
+        - output (Tensor): Saída do controlador (batch_size, 1)
+        """
+        # Garante que o estado interno tenha o mesmo batch_size
+        if self.integral.shape[0] != error.shape[0]:
+            self.integral = torch.zeros_like(error, device=error.device)
+            self.previous_error = torch.zeros_like(error, device=error.device)
+
+        # Calcula a saída do PID
+        output = self.formula(error)
+
+        # Atualiza estados internos
+        self.previous_error = error.detach()
+
+        return output
+
 
 class PIDController:
     """
@@ -46,13 +118,13 @@ class PIDController:
         self.integral = 0 # precisa ser guardado no self para ir acumulando a cada chamada de controle do pid
 
         def _PID_formula(error):
-            self.integral += error * self.dt
+            self.integral += error
             self.integral = np.clip(self.integral, self.min, self.max)
             derivative = (error - self.previous_error) / self.dt
-            self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+            return self.Kp * error + self.Ki * self.integral + self.Kd * derivative
 
         def _PI_formula(error):
-            self.integral += error * self.dt
+            self.integral += error
             self.integral = np.clip(self.integral, self.min, self.max)
             return self.Kp * error + self.Ki * self.integral
         
@@ -65,6 +137,15 @@ class PIDController:
             "P": _P_formula
         }
         self.formula = map_type_to_formula[controller_type]
+
+
+    def reset(self):
+        """
+        Reseta os estados internos do controlador (integral e erro anterior).
+        """
+        self.integral = 0
+        self.previous_error = 0
+
 
     def __call__(self, error: float) -> float:
         output = self.formula(error)

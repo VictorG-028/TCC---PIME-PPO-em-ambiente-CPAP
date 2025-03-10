@@ -70,12 +70,16 @@ class CustomMLP_divided(nn.Module):
         if activation_function == "no activation":
             upper_net = nn.Sequential(
                 nn.Linear(feature_dim - 1, upper_net_neurons_per_layers),
+                nn.BatchNorm1d(28),
                 nn.Linear(upper_net_neurons_per_layers, upper_net_neurons_per_layers), # Finish with upper_net_neurons_per_layers
+                nn.BatchNorm1d(28)
             )
 
             lower_net = nn.Sequential(
                 nn.Linear(1, lower_net_neurons_per_layers),
+                nn.BatchNorm1d(14),
                 nn.Linear(lower_net_neurons_per_layers, lower_net_neurons_per_layers), # Finish with lower_net_neurons_per_layers
+                nn.BatchNorm1d(14)
             )
 
             merged_net = nn.Sequential(
@@ -128,7 +132,12 @@ class CustomMLP_divided(nn.Module):
 
 
     def forward(self, input_vector: pyTorch.Tensor):
-        # print(f"[CustomMLP forward] {input_vector=}")
+        # # print(f"[CustomMLP forward] {input_vector=}")
+        # print(f"log_std antes do treino: {self}")
+        # print(f"log_std antes do treino: {dir(self)}")
+        # print(f"log_std antes do treino: {self.ppo.policy.log_std}")
+
+        # self.ppo.policy.log_std.data.clamp_(-2, 2)  # Mantém os valores dentro de uma faixa razoável
 
         return self.forward_actor(input_vector), self.forward_critic(input_vector)
 
@@ -261,6 +270,12 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
             **kwargs,
         )
 
+        # self.optimizer = pyTorch.optim.Adam(
+        #     self.parameters(),  # Usa os parâmetros da rede neural
+        #     lr=3e-4,
+        #     weight_decay=1e-5  # Evita que os pesos fiquem muito pequenos
+        # )
+
     def _build_mlp_extractor(self) -> None:
         if self.__divide_neural_network:
             self.mlp_extractor = CustomMLP_divided(
@@ -278,6 +293,12 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
                 neurons_per_layer=self.__neurons_per_layer,
                 activation_function_name=self.__activation_function_name
             )
+    
+    # def train(self, _: bool):
+    #     self.optimizer.zero_grad()  # Zera os gradientes
+    #     loss = self.compute_loss()  # Calcula a loss (exemplo)
+    #     loss.backward()  # Propaga os gradientes
+    #     self.optimizer.step()  # Atualiza os pesos
 
 
 
@@ -431,6 +452,7 @@ class PIME_PPO:
         # steps_extra_info: list[tuple] = []
         steps_in_episode = 0
         total_steps_counter = 0
+        trainings = 0
 
         device = self.device
 
@@ -439,6 +461,15 @@ class PIME_PPO:
         # [uncomment] print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
         def train_and_reset_ppo() -> None:
+            for param in self.ppo.policy.parameters():
+                param.data.clamp_(-0.2, 0.2)
+            self.ppo.policy.log_std.data.clamp_(-2, 2)  # Mantém os valores dentro de uma faixa razoável
+            # self.ppo.rollout_buffer.actions = pyTorch.clamp(pyTorch.tensor(self.ppo.rollout_buffer.actions), -1, 1)
+            # pyTorch.nn.utils.clip_grad_norm_(self.ppo.policy.parameters(), max_norm=0.1) #0.1
+            # pyTorch.nn.utils.clip_grad_value_(
+            #     list(self.ppo.policy.parameters()), 
+            #     clip_value=1e-3
+            # ) #don't uncomment, raise "RuntimeError: Expected !nested_tensorlist[0].empty() to be true, but got false."
             self.ppo.train()
             self.ppo.rollout_buffer.reset()
 
@@ -462,7 +493,7 @@ class PIME_PPO:
                     while not done:
 
                         pi_action = self.pid_controller(self.env.unwrapped.error)
-
+                
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
                         ppo_action = ppo_action.item()
 
@@ -473,7 +504,7 @@ class PIME_PPO:
                         # action = pi_action * ppo_action
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
-                        print(f"NEXT OBS @@@ {next_obs=} | {self.env.unwrapped.error=}")
+                        # print(f"NEXT OBS @@@ {next_obs=} | {self.env.unwrapped.error=}")
                         # input(">>>")
                         steps_in_episode += 1
                         total_steps_counter += 1    
@@ -488,15 +519,27 @@ class PIME_PPO:
                             log_prob = policy_distribution.log_prob(action_tensor)
 
 
-                        # self.ppo.rollout_buffer.add(obs, action, reward, done, value, log_prob)
+                        self.ppo.rollout_buffer.add(obs, action_tensor, reward, done, value, log_prob)
                         records.append((*next_obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
-
+                        if total_steps_counter % self.ppo.n_steps == 0:
+                            
+                            for name, param in self.ppo.policy.named_parameters():
+                                if param.requires_grad:
+                                    print(f"{name}: max={param.data.max()}, min={param.data.min()}")
+                                if param.grad is not None:
+                                    print(f"{name}: max_grad={param.grad.max()}, min_grad={param.grad.min()}")
+                            print(f"log_std antes do treino: {self.ppo.policy.log_std}")
+                            print(f"Ações armazenadas: {self.ppo.rollout_buffer.actions.mean()}, {self.ppo.rollout_buffer.actions.std()}, {self.ppo.rollout_buffer.actions.min()}, {self.ppo.rollout_buffer.actions.max()}")
+                            print(f"--------------------------------- {trainings=}")
+                            trainings += 1
+                        if trainings == 95:
+                            pass
                         # (branchless) Treina e reseta o buffer ao atingir `n_steps`
-                        # branchless_train_and_reset[
-                        #     total_steps_counter % self.ppo.n_steps == 0
-                        # ]()
+                        branchless_train_and_reset[
+                            total_steps_counter % self.ppo.n_steps == 0
+                        ]()
                             
                     # End of while loop / end of episode run ###################
 

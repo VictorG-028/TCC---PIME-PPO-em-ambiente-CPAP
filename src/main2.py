@@ -19,46 +19,48 @@ locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8') # show date and time in portugues
 experiments = {
     'double_water_tank': {
         "create_env_function": CascadeWaterTankEnv.create_water_tank_environment,
-        "training_logs_folder_path": "logs/ppo/double_water_tank/trainings_2/{id}",
-        "best_results_folder_path": "logs/ppo/double_water_tank/best/",
+        "training_logs_folder_path": "logs/TD3_DDPG/double_water_tank/trainings/{id}",
+        "best_results_folder_path": "logs/TD3_DDPG/double_water_tank/best/",
 
         "hyperparameters": {
             "extra info": "função de simulação control", # "função de simulação usando biblioteca control",
             "seed": 42,
-            "PIME_PPO": {
-                ## PPO
-                "vf_coef":  1.0, 
-                "ent_coef": 0.02,
-                "gae_lambda": 0.97,
-                "clip_range": 0.2,
+            "PIME_TD3_DDPG": {
+                ## TD3_DDPG
+                "target_decay": 0.97,
                 "discount": 0.995,
-                "horizon": 200,
-                "adam_stepsize": 3e-4,
-                "minibatch_size": 128,
+                "mu_lr": 3e-4,
+                "q_lr": 3e-4,
+                "batch_size": 128,
                 "epochs": 10,
+                "policy_update_freq": 4,
+                "noise": 0.2,
+                "noise_clip": 0.5,
                 "ensemble_size": 5,
-                "divide_neural_network": True,
+                "divide_neural_network": False,
                 "neurons_per_layer": 6,
-                "activation_function_name": "no activation", # "no activation" "relu" "tanh"
+                "activation_function_name": "tanh", # "no activation" "relu" "tanh"
+                "use_activation_func_in_last_layer": False,
+
 
                 ## PIME
                 "tracked_point_name": 'x2',
                 "episodes_per_sample": 5,
 
-                # PID (ZN - kp=8.80 e ki=11.46)
+                # PID (ZN - kp=8.80 e ki=11.46)(Optuna - kp=9.31 e ki=4.31)(manual - kp=8.8 e ki=0.015)
                 "Kp": 8.8, 
                 "Ki": 0.015,
-                "Kd": 0,
+                "Kd": 0.1,
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "ppo_action_bounds": (-1, 1),           # [V]
-                "ppo_observation_min_bounds": (0, 0), # [cm, cm]
-                "ppo_observation_max_bounds": (10, 10), # [cm, cm]
-                "pid_type": "PI",
+                "ppo_action_bounds": (-30, 30),           # [V]
+                "ppo_observation_min_bounds": (0, 0),     # [cm, cm]
+                "ppo_observation_max_bounds": (10, 10),   # [cm, cm]
+                "pid_type": "PID",
             },
             ## Scheduller
-            "set_points": [3, 6, 9, 4, 2], # [cm]
+            "set_points": [5, 2, 6, 8, 3], # [cm]
             "intervals": [400, 400, 400, 400, 400], # [s]
 
             ## Model Ensemble
@@ -71,33 +73,29 @@ experiments = {
             },
         }
     },
-    'ph_control': {
-        'create_env_function': PhControl.create_ph_control_environment,
-        'logs_folder_path': "logs/ppo/ph_control/{start_date_time}",
-        'tracked_point': 'x2',
-    },
     'CPAP': {
         "create_env_function": CpapEnv.create_cpap_environment,
-        "training_logs_folder_path": "logs/ppo/CPAP/optuna_trainings_final/{id}",
-        "best_results_folder_path": "logs/ppo/CPAP/best/",
+        "training_logs_folder_path": "logs/TD3_DDPG/CPAP/trainings/{id}",
+        "best_results_folder_path": "logs/TD3_DDPG/CPAP/best/",
 
         "hyperparameters": {
             "seed": 42,
-            "PIME_PPO": {
-                ## PPO
-                "vf_coef": 1.0,
-                "ent_coef": 0.02,
-                "gae_lambda": 0.97,
-                "clip_range": 0.2,
+            "PIME_TD3_DDPG": {
+                ## TD3_DDPG
+                "target_decay": 0.97,
                 "discount": 0.94,
-                "horizon": 200,
-                "adam_stepsize": 3e-4,
-                "minibatch_size": 256,
+                "mu_lr": 3e-4,
+                "q_lr": 3e-4,
+                "batch_size": 256,
                 "epochs": 10,
+                "policy_update_freq": 4,
+                "noise": 0.2,
+                "noise_clip": 0.5,
                 "ensemble_size": 5,
                 "divide_neural_network": True,
                 "neurons_per_layer": 42,
-                "activation_function_name": "no activation", # "no activation" "relu" "tanh"
+                "activation_function_name": "tanh", # "no activation" "relu" "tanh"
+                "use_activation_func_in_last_layer": False,
 
                 ## PIME
                 "tracked_point_name": 'x3',
@@ -110,18 +108,15 @@ experiments = {
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "ppo_action_bounds": (-1, 1),         # [v]
+                "ppo_action_bounds": (-1, 1),                          # [v]
                 "ppo_observation_min_bounds": (-np.inf, -np.inf, -14), # [ml/s, ml^3, cmH2O]
-                "ppo_observation_max_bounds": (np.inf, np.inf, 14), # [ml/s, ml^3, cmH2O]
+                "ppo_observation_max_bounds": (np.inf, np.inf, 14),    # [ml/s, ml^3, cmH2O]
                 "pid_type": "PI",
                 "max_step": 10_000,
-                # "max_step": 15_000,
             },
             ## Scheduller
             "set_points": [3, 12, 5, 7, 5], # pressure [cmH2O]
             "intervals": [2000, 2000, 2000, 2000, 2000], # [s]
-            # "set_points": [7, 9, 5], # pressure [cmH2O]
-            # "intervals": [5000, 5000, 5000], # [s]
 
             "distributions": {
 
@@ -145,18 +140,6 @@ experiments = {
                 # Model constants
                 "f_s": ("constant", {"constant": 1000}),           # [Hz] - frequência de amostragem
                 "dt": ("constant", {"constant": 1/1000}),          # [s] 1/1000
-
-                # # Lung
-                # "r_aw": ("constant", {"constant": 3}),
-                # "c_rs": ("constant", {"constant": 60}),
-
-                # # Ventilator
-                # "kv": ("constant", {"constant": 0.99}),
-                # "tv": ("constant", {"constant": 0.01}),
-                # "v_t": ("constant", {"constant": 350}),
-                # "rr": ("constant", {"constant": 15}),
-                # "t_i": ("constant", {"constant": 1.0}),
-                # "t_ip": ("constant", {"constant": 0.25}),
             }
         },
     },
@@ -168,32 +151,28 @@ experiments = {
 with open("./terminal_outputs.txt", 'w') as f:
 
     # sys.stdout = f
-    import time
-    start_time = time.time()
 
     run_training(
-        experiments["CPAP"], 
-        steps_to_run=10_000, 
+        experiments["double_water_tank"], 
+        steps_to_run=200_000,
         should_save_records=True,
-        extra_record_only_pid=True,
+        extra_record_only_pid=False,
         should_save_trained_model=False,
         use_GPU=False
     )
-    # run_optuna(
+
+    # run_training(
     #     experiments["CPAP"], 
-    #     steps_to_run=400_000, # 2_000, # 15_000,
+    #     steps_to_run=10_000,
     #     should_save_records=True,
     #     extra_record_only_pid=False,
     #     should_save_trained_model=False,
-    #     n_trials=17*1,
-    #     n_jobs=17,
     #     use_GPU=False
     # )
-    end_time = time.time()
-    print(f"Tempo de execução: {(end_time - start_time)=} segundos")
+
     # run_optuna(
     #     experiments["CPAP"], 
-    #     steps_to_run=400_000, # 2_000, # 15_000,
+    #     steps_to_run=16_000, # 2_000, # 15_000,
     #     should_save_records=True,
     #     extra_record_only_pid=False,
     #     should_save_trained_model=False,

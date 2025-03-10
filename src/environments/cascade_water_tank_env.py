@@ -139,19 +139,27 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
             "z_t": spaces.Box(low=0, high=float('inf'), shape=(1,), dtype=np.float64)
         })
 
-        # 3. Criar o sistema não linear discreto usando `dt=2`
-        self.double_tank_system = ct.nlsys(
-            double_tank_update, double_tank_output, 
-            states=2, inputs=1, outputs=2, 
-            params={"g": 981, "p1": 0.0020, "p2": 0.0020, "p3": 0.1, "dt": 2}, 
-            dt=2  # Agora o sistema é discreto com passo 2 segundos
-        )
         self.current_time = 0
 
 
     # uncomment if needed
     # def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> tuple[dict[str, Any], dict]:
     #     return super().reset(seed=seed, options=options)
+
+    def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        obs, _ = super().reset(seed=seed, options=options)
+
+        obs["x1"] = 0
+        
+        # 3. Criar o sistema não linear discreto usando `dt=2`
+        self.double_tank_system = ct.nlsys(
+            double_tank_update, double_tank_output, 
+            states=2, inputs=1, outputs=2, 
+            params=options["ensemble_sample_parameters"],#{"g": 981, "p1": 0.0020, "p2": 0.0020, "p3": 0.1, "dt": 2}, 
+            dt=2  # Agora o sistema é discreto com passo 2 segundos
+        )
+        
+        return obs, _
 
 
     def simulation_model(self,
