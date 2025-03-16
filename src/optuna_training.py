@@ -6,10 +6,12 @@ from time import sleep
 import optuna
 from functools import partial
 
+from algorithms.PIME_TD3 import PIME_TD3
 from algorithms.PIME_PPO import PIME_PPO
 from save_file_utils import create_dir_if_not_exists, create_textfile_if_not_exists, read_textfile_and_increment_id, save_hyperparameters_as_json
 
 def run_optuna(
+        algorithm_class: PIME_PPO | PIME_TD3,
         experiment: dict[str, any], 
         steps_to_run = 100_000,
         extra_record_only_pid = False,
@@ -63,11 +65,11 @@ def run_optuna(
             #     "episodes_per_sample": 1
             # }
             search_space = {
-                # "vf_coef": trial.suggest_float("vf_coef", 0.01, 10.0, log=True),
-                # "horizon": trial.suggest_int("horizon", 200, 2000, step=200),
                 "epochs": trial.suggest_int("epochs", 2, 20, step=2),
-                "batch_size": trial.suggest_categorical("minibatch_size", [32, 64, 128, 256]),
-                "adam_stepsize": trial.suggest_float("adam_stepsize", 1e-5, 3e-4, log=True),
+                "batch_size": trial.suggest_categorical("batch_size", [32, 64, 128, 256]),
+                "mu_lr": trial.suggest_float("mu_lr", 1e-5, 3e-4, log=True),
+                # "q_lr": trial.suggest_float("q_lr", 1e-5, 3e-4, log=True),
+                "policy_update_freq": trial.suggest_int("policy_update_freq", 2, 32, step=2),
                 "neurons_per_layer": trial.suggest_int("neurons_per_layer", 6, 60, step=6),
                 "divide_neural_network": trial.suggest_categorical("divide_neural_network", [True, False]),
                 "activation_function_name": trial.suggest_categorical("activation_function_name", ["no activation", "relu", "tanh"]),
@@ -77,7 +79,7 @@ def run_optuna(
 
             # Atualiza os hiperparâmetros do experimento com os espaços de possíveis valores
             new_hyperparameters = base_hyperparameters.copy()
-            new_hyperparameters["PIME_TD3_DDPG"].update(search_space)
+            new_hyperparameters["PIME"].update(search_space)
             
             return new_hyperparameters
 
@@ -102,9 +104,9 @@ def run_optuna(
             experiment
         )
 
-        pime_ppo_controller = PIME_PPO(
+        pime_ppo_controller = algorithm_class(
             env, scheduller, ensemble,
-            **hyperparameters["PIME_TD3_DDPG"],
+            **hyperparameters["PIME"],
             use_GPU=use_GPU,
             logs_folder_path=trial_logs_folder_path,
             integrator_bounds=hyperparameters["PID_and_Env"]["integrator_bounds"],

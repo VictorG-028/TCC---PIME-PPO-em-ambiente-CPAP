@@ -70,16 +70,12 @@ class CustomMLP_divided(nn.Module):
         if activation_function == "no activation":
             upper_net = nn.Sequential(
                 nn.Linear(feature_dim - 1, upper_net_neurons_per_layers),
-                nn.BatchNorm1d(28),
                 nn.Linear(upper_net_neurons_per_layers, upper_net_neurons_per_layers), # Finish with upper_net_neurons_per_layers
-                nn.BatchNorm1d(28)
             )
 
             lower_net = nn.Sequential(
                 nn.Linear(1, lower_net_neurons_per_layers),
-                nn.BatchNorm1d(14),
                 nn.Linear(lower_net_neurons_per_layers, lower_net_neurons_per_layers), # Finish with lower_net_neurons_per_layers
-                nn.BatchNorm1d(14)
             )
 
             merged_net = nn.Sequential(
@@ -261,20 +257,21 @@ class CustomActorCriticPolicy(ActorCriticPolicy):
         self.__divide_neural_network = kwargs.pop("divide_neural_network")
         self.__neurons_per_layer = kwargs.pop("neurons_per_layer")
         self.__activation_function_name = kwargs.pop("activation_function_name")
+        __adam_stepsize = kwargs.pop("adam_stepsize")
+        __weight_decay = kwargs.pop("weight_decay")
 
         super().__init__(
             observation_space,
             action_space,
             lr_schedule,
+            optimizer_kwargs={
+                "eps": 1e-5,
+                # "lr": __adam_stepsize,
+                "weight_decay": __weight_decay
+            },
             *args,
             **kwargs,
         )
-
-        # self.optimizer = pyTorch.optim.Adam(
-        #     self.parameters(),  # Usa os parâmetros da rede neural
-        #     lr=3e-4,
-        #     weight_decay=1e-5  # Evita que os pesos fiquem muito pequenos
-        # )
 
     def _build_mlp_extractor(self) -> None:
         if self.__divide_neural_network:
@@ -336,13 +333,15 @@ class PIME_PPO:
                  vf_coef: float = 1.0,                                                 # PPO param c1 = vf_coef
                  ent_coef: float = 0.02,                                               # PPO param c2 = ent_coef
                  horizon: int = 200,                                                   # PPO param
-                 adam_stepsize: float = 3e-4,                                          # PPO param
+                 adam_stepsize: float = 3e-4,                                          # PPO param (torch adam optimzer)
+                 weight_decay: float = 1e-5,                                           # PPO param (torch adam optimzer)
                  minibatch_size: int = 256,                                            # PPO param
                  epochs: int = 10,                                                     # PPO param
                  divide_neural_network: bool = True,                                   # PPO neural net param
                  neurons_per_layer: int = 6,                                           # PPO neural net param
                  activation_function_name: Literal["no activation"] = "no activation", # PPO neural net param
                  integrator_bounds: tuple[int, int] = (-25, 25),                       # Clip para PID e PPO (formula do integrator)
+                 agent_action_bounds: tuple[int, int] = (-1, 1),                       # Clip para PPO (foward que retorna resultado da rede neural)
                  pid_type: Literal["PID", "PI", "P"] = "PI",                           # PID, PI or P
                  sample_period: int = 1,                                               # Euler method sampling period (dt)
                  seed: Optional[int] = None,                                           # Seed for reproducibility
@@ -423,7 +422,9 @@ class PIME_PPO:
                        policy_kwargs         = {
                             "divide_neural_network": divide_neural_network,
                             "neurons_per_layer": neurons_per_layer,
-                            "activation_function_name": activation_function_name
+                            "activation_function_name": activation_function_name,
+                            "adam_stepsize": adam_stepsize,
+                            "weight_decay": weight_decay,
                             }
                        )
         
@@ -437,7 +438,7 @@ class PIME_PPO:
     def train(self, 
               steps_to_run = 100_000,
               extra_record_only_pid: bool = False,
-              extra_record_only_ppo: bool = False,
+              extra_record_only_agent: bool = False,
               should_save_records: bool = True,
               should_save_trained_model: bool = False,
             ) -> float:
@@ -461,15 +462,6 @@ class PIME_PPO:
         # [uncomment] print(f"Steps requested: {steps_to_run}, Steps to be executed: {iterations * steps_per_iteration} (Iterations: {iterations})")
 
         def train_and_reset_ppo() -> None:
-            for param in self.ppo.policy.parameters():
-                param.data.clamp_(-0.2, 0.2)
-            self.ppo.policy.log_std.data.clamp_(-2, 2)  # Mantém os valores dentro de uma faixa razoável
-            # self.ppo.rollout_buffer.actions = pyTorch.clamp(pyTorch.tensor(self.ppo.rollout_buffer.actions), -1, 1)
-            # pyTorch.nn.utils.clip_grad_norm_(self.ppo.policy.parameters(), max_norm=0.1) #0.1
-            # pyTorch.nn.utils.clip_grad_value_(
-            #     list(self.ppo.policy.parameters()), 
-            #     clip_value=1e-3
-            # ) #don't uncomment, raise "RuntimeError: Expected !nested_tensorlist[0].empty() to be true, but got false."
             self.ppo.train()
             self.ppo.rollout_buffer.reset()
 
@@ -495,7 +487,7 @@ class PIME_PPO:
                         pi_action = self.pid_controller(self.env.unwrapped.error)
                 
                         ppo_action, next_hidden_state = self.ppo.predict(obs)
-                        ppo_action = ppo_action.item()
+                        ppo_action = 30.0 * ppo_action.item()
 
                         action = pi_action + ppo_action
 
@@ -523,19 +515,19 @@ class PIME_PPO:
                         records.append((*next_obs, pi_action, ppo_action, action, reward, self.env.unwrapped.error, steps_in_episode))
 
                         obs = next_obs # Can update obs after storing in buffer
-                        if total_steps_counter % self.ppo.n_steps == 0:
+                        # if total_steps_counter % self.ppo.n_steps == 0:
                             
-                            for name, param in self.ppo.policy.named_parameters():
-                                if param.requires_grad:
-                                    print(f"{name}: max={param.data.max()}, min={param.data.min()}")
-                                if param.grad is not None:
-                                    print(f"{name}: max_grad={param.grad.max()}, min_grad={param.grad.min()}")
-                            print(f"log_std antes do treino: {self.ppo.policy.log_std}")
-                            print(f"Ações armazenadas: {self.ppo.rollout_buffer.actions.mean()}, {self.ppo.rollout_buffer.actions.std()}, {self.ppo.rollout_buffer.actions.min()}, {self.ppo.rollout_buffer.actions.max()}")
-                            print(f"--------------------------------- {trainings=}")
-                            trainings += 1
-                        if trainings == 95:
-                            pass
+                        #     for name, param in self.ppo.policy.named_parameters():
+                        #         if param.requires_grad:
+                        #             print(f"{name}: max={param.data.max()}, min={param.data.min()}")
+                        #         if param.grad is not None:
+                        #             print(f"{name}: max_grad={param.grad.max()}, min_grad={param.grad.min()}")
+                        #     print(f"log_std antes do treino: {self.ppo.policy.log_std}")
+                        #     print(f"Ações armazenadas: {self.ppo.rollout_buffer.actions.mean()}, {self.ppo.rollout_buffer.actions.std()}, {self.ppo.rollout_buffer.actions.min()}, {self.ppo.rollout_buffer.actions.max()}")
+                        #     print(f"--------------------------------- {trainings=}")
+                        #     trainings += 1
+                        # if trainings == 95:
+                        #     pass
                         # (branchless) Treina e reseta o buffer ao atingir `n_steps`
                         branchless_train_and_reset[
                             total_steps_counter % self.ppo.n_steps == 0
@@ -599,7 +591,7 @@ class PIME_PPO:
         if (extra_record_only_pid and should_save_records):
             self.record_pid_episode(sample_parameters)
 
-        if (extra_record_only_ppo and should_save_records):
+        if (extra_record_only_agent and should_save_records):
             self.record_ppo_episode(sample_parameters)
 
         return last_episode_reward

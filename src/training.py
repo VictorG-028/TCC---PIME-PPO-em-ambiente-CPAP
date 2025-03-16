@@ -1,15 +1,16 @@
 from datetime import datetime
-
-from algorithms.PIME_DDPG import PIME_DDPG
+from algorithms.PIME_PPO import PIME_PPO
+from algorithms.PIME_TD3 import PIME_TD3
 from save_file_utils import save_hyperparameters_as_json
 
-
 def run_training(
+        algorithm_class: PIME_PPO | PIME_TD3,
         experiment: dict[str, any], 
         steps_to_run = 100_000,
         extra_record_only_pid = False,
         should_save_records = False,
         should_save_trained_model = False,
+        extra_record_trained_agent = False,
         use_GPU = False
     ) -> None:
 
@@ -35,23 +36,24 @@ def run_training(
         experiment
     )
 
-    controller = PIME_DDPG(
+    controller = algorithm_class(
         env,
         scheduller,
         ensemble,
-        **hyperparameters["PIME_TD3_DDPG"],
+        **hyperparameters["PIME"],
         use_GPU=use_GPU,
         logs_folder_path=training_logs_folder_path,
         integrator_bounds=hyperparameters["PID_and_Env"]["integrator_bounds"],
-        agent_action_bounds=hyperparameters["PID_and_Env"]["ppo_action_bounds"],
+        agent_action_bounds=hyperparameters["PID_and_Env"]["agent_action_bounds"],
         pid_type=hyperparameters["PID_and_Env"]["pid_type"],
         sample_period=hyperparameters["distributions"]["dt"][1]["constant"],
-        seed=hyperparameters["seed"]
+        seed=hyperparameters["seed"],
     )
 
     score = controller.train(
         steps_to_run=steps_to_run, 
         extra_record_only_pid=extra_record_only_pid,
         should_save_records=should_save_records,
-        should_save_trained_model=should_save_trained_model
+        should_save_trained_model=should_save_trained_model,
+        extra_record_only_agent=extra_record_trained_agent
     )

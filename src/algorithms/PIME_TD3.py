@@ -28,9 +28,13 @@ class ANN_divided(nn.Module):
                 out_multiplier=1.0, 
                 pid=lambda x: 0, 
                 env_name = "double_water_tank",
-                activation_function: Literal["no activation", "relu", "tanh"] = "no activation"
+                activation_function: Literal["no activation", "relu", "tanh"] = "no activation",
+                use_activation_func_in_last_layer: bool = False
                 ):
         super(ANN_divided, self).__init__()
+        self.set_biases_to_zero()
+
+        # out_multiplier = 1.0
         self.multiplier = pyTorch.tensor(out_multiplier, dtype=pyTorch.float32)
 
         self.pid = pid
@@ -87,10 +91,17 @@ class ANN_divided(nn.Module):
 
         # Rede de fusão
         merge_size = upper_net_neurons_per_layer + lower_net_neurons_per_layer
-        merged = [nn.Linear(merge_size, out_size)]
-        if activation_function != "no activation":
-            merged.append(self.activation_function())
-        self.policy_merged_net = nn.Sequential(*merged)
+        if use_activation_func_in_last_layer and activation_function != "no activation":
+            merged_net = nn.Sequential(
+                nn.Linear(merge_size, out_size),
+                self.activation_function()
+            )
+            raise NotImplementedError("Não deveria entrar aqui.")
+        else:
+            merged_net = nn.Sequential(
+                nn.Linear(merge_size, out_size)
+            )
+        self.policy_merged_net = merged_net
 
     def _build_mlp(self, input_size, neurons_per_layer, activation_function):
         """Cria um MLP de 3 camadas com ativação opcional"""
@@ -114,11 +125,19 @@ class ANN_divided(nn.Module):
         out = self.policy_merged_net(merged_tensor)
 
         error = self.error_extractor(input_vector)
-
+        # pid_action = self.pid.forward(error)
+        # out = out * self.multiplier 
+        # out = out + pid_action
         return out * self.multiplier + self.pid.forward(error)
     
     def reset_pid(self):
         self.pid.reset()
+
+    def set_biases_to_zero(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Linear):
+                nn.init.zeros_(layer.bias)  # Define todos os bias como zero
+
 
 class ANN(nn.Module):
     def __init__(self, 
@@ -126,6 +145,7 @@ class ANN(nn.Module):
                 hidden_sizes, 
                 out_size,
                 out_multiplier=1.0, 
+                # recorder = lambda out: None,
                 pid: Batch_PIDController = lambda input_tensor: 0,   
                 env_name = "double_water_tank", # TODO: remove env_name parameter
                 activation_function: Literal["no activation", "relu", "tanh"] = "no activation",
@@ -137,6 +157,7 @@ class ANN(nn.Module):
         layers = []
 
         self.pid = pid 
+        # self.recorder = recorder
         # Batch_PIDController(kp, ki, kd, 
                                     #    integrator_bounds=(-25, 25),
                                     #    dt=2,
@@ -190,11 +211,13 @@ class ANN(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, input_vector: pyTorch.Tensor):
-        out = self.net(input_vector)
+        out: pyTorch.Tensor = self.net(input_vector)
 
-        error = self.error_extractor(input_vector)
+        # self.recorder(out.tolist())
 
-        return out * self.multiplier + self.pid.forward(error)
+        # error = self.error_extractor(input_vector)
+
+        return out * self.multiplier # + self.pid.forward(error)
 
     def reset_pid(self):
         self.pid.reset()
@@ -253,11 +276,35 @@ class SyncNet:
       sync_param.data.copy_(sync_param.data*decay + param.data*(1.0 - decay))
 
 
+# class ANN_Recorder:
+#     action_buffer: list[float]
+#     noise_buffer: list[float]
+
+#     def __init__(self):
+#         self.action_buffer = []
+#         self.noise_buffer = []
+
+#     def add_action(self, action: float):
+#         self.action_buffer.append(action)
+
+#     def add_noise(self, noise: float):
+#         self.noise_buffer.append(noise)
+
+#     def reset(self):
+#         self.action_buffer = []
+#         self.noise_buffer = []
+
+#     def __call__(self, action: float):
+#         self.action_buffer.append(action)
+    
+#     def __len__(self):
+#         return len(self.action_buffer)
+
 class TD3_Agent:
     def __init__(self, 
                 state_size, 
                 num_actions, 
-                action_max, 
+                action_bounds: tuple[float, float], 
                 mu_lr, q_lr, 
                 target_decay, 
                 hidden_sizes=[400, 300], 
@@ -270,23 +317,28 @@ class TD3_Agent:
                 ):
 
         self.device = device # pyTorch.device(device)
-        
+        self.min_action_bound = action_bounds[0]
+        self.max_action_bound = action_bounds[1]
+        # self.ann_recorder = ANN_Recorder()
+
         if is_divided:
             self.mu_net      = ANN_divided(state_size, hidden_sizes, num_actions, 
-                                        out_multiplier=action_max, 
-                                        pid=pid, 
-                                        env_name=env_name, 
-                                        activation_function=activation_function, 
-                                        use_activation_func_in_last_layer=use_activation_func_in_last_layer
-                                )
-        else:
-            self.mu_net       = ANN(state_size, hidden_sizes, num_actions, 
-                                    out_multiplier=action_max, 
+                                    out_multiplier=self.max_action_bound, 
                                     pid=pid, 
                                     env_name=env_name, 
                                     activation_function=activation_function, 
                                     use_activation_func_in_last_layer=use_activation_func_in_last_layer
-                                    )
+                                    # recorder=lambda out: self.ann_recorder(out)
+                                )
+        else:
+            self.mu_net       = ANN(state_size, hidden_sizes, num_actions, 
+                                    out_multiplier=self.max_action_bound, 
+                                    pid=pid, 
+                                    env_name=env_name, 
+                                    activation_function=activation_function, 
+                                    use_activation_func_in_last_layer=use_activation_func_in_last_layer
+                                    # recorder=lambda out: self.ann_recorder(out)
+                                )
         
         self.q_net       = TD3_Critic(state_size, num_actions, hidden_sizes, is_divided, pid, env_name, activation_function, use_activation_func_in_last_layer)
         self.mu_targ_net = SyncNet(self.mu_net)
@@ -294,11 +346,17 @@ class TD3_Agent:
         print(self.mu_net)
         print(self.q_net)
         self.num_actions = num_actions
-        self.action_max = action_max
+        
 
         # Train each network separately
-        self.mu_optimizer = optim.Adam(self.mu_net.parameters(), lr=mu_lr)
-        self.q_optimizer = optim.Adam(self.q_net.parameters(), lr=q_lr)
+        self.mu_optimizer = optim.Adam(
+            filter(lambda p: p.requires_grad and len(p.shape) > 1, self.mu_net.parameters()), 
+            lr=mu_lr
+        )
+        self.q_optimizer = optim.Adam(
+            filter(lambda p: p.requires_grad and len(p.shape) > 1, self.q_net.parameters()),
+            lr=q_lr
+        )
         self.tgt_decay = target_decay   # soft update factor used in the target networks; it is the complement of 'tau' (1.0 - tau)
 
     def reset_pid(self):
@@ -307,13 +365,19 @@ class TD3_Agent:
         self.mu_targ_net.sync_model.reset_pid()
         self.mu_targ_net.sync_model.reset_pid()
 
-    def save(self, filename, directory="./saves"):
-        pyTorch.save(self.mu_net.state_dict(), '%s/%s_actor.pth' % (directory, filename))
-        pyTorch.save(self.q_net.state_dict(), '%s/%s_critic.pth' % (directory, filename))
+        # self.ann_recorder.reset()
 
-    def load(self, filename="best_avg", directory="./saves"):
-        self.mu_net.load_state_dict(pyTorch.load('%s/%s_actor.pth' % (directory, filename)))
-        self.q_net.load_state_dict(pyTorch.load('%s/%s_critic.pth' % (directory, filename)))
+    def save(self, dir_path: str):
+        pyTorch.save(self.mu_net.state_dict(), f'{dir_path}/actor.pth')
+        pyTorch.save(self.q_net.state_dict(), f'{dir_path}/critic.pth')
+
+    def load(self, dir_path: str, state_dict: Optional[dict] = None):
+        if (state_dict):
+            self.mu_net.load_state_dict(state_dict['actor'])
+            self.q_net.load_state_dict(state_dict['critic'])
+        else:
+            self.mu_net.load_state_dict(pyTorch.load(f'{dir_path}/actor.pth'))
+            self.q_net.load_state_dict(pyTorch.load(f'{dir_path}/critic.pth'))
 
     def select_action(self, state, noise=0.1, noise_clip=None):
         """ Select an appropriate action from the agent policy
@@ -324,14 +388,15 @@ class TD3_Agent:
             actions (float array): actions clipped within action range
         """
         state = pyTorch.FloatTensor(state.reshape(1, -1)).to(self.device)
-        action = self.mu_net(state)
+        action: pyTorch.Tensor = self.mu_net(state)
         action = action.squeeze(dim=0).detach().numpy() 
         if noise != 0: 
             noise = np.random.normal(0, noise, size=self.num_actions)
         if noise_clip is not None:
             noise = noise.clip(-noise_clip, noise_clip)
+        # self.ann_recorder.add_noise(noise)
         action += noise
-        return action.clip(-self.action_max, self.action_max)
+        return action.clip(self.min_action_bound, self.max_action_bound)
 
     def update(self, replay_buffer, iterations, batch_size=100, discount=0.99, policy_noise=0.2, noise_clip=0.5, policy_freq=2):
         """ Train and update actor and critic networks
@@ -347,7 +412,7 @@ class TD3_Agent:
         """
         q_losses = []
         mu_losses = []
-        for it in range(iterations):
+        for iteration in range(iterations):
             # Sample replay buffer 
             batch = replay_buffer.sample(batch_size)
             s1 = pyTorch.FloatTensor(batch.obs).to(self.device)
@@ -364,7 +429,7 @@ class TD3_Agent:
             noise = noise.clip(-noise_clip, noise_clip)
             noise = pyTorch.as_tensor(noise, dtype=pyTorch.float32)
             a2 = self.mu_targ_net(s2) + noise
-            a2.clamp_(-self.action_max, self.action_max)
+            a2.clamp_(self.min_action_bound, self.max_action_bound)
 
             # Compute the target Q value
             target_q1, target_q2 = self.q_targ_net(s2, a2)
@@ -385,7 +450,7 @@ class TD3_Agent:
             self.q_optimizer.step()
 
             # Delayed policy updates
-            if it % policy_freq == 0:
+            if iteration % policy_freq == 0:
                 # Compute actor loss
                 mu_loss = -self.q_net.forward_q1(s1, self.mu_net(s1))
                 mu_loss = mu_loss.mean()
@@ -442,15 +507,15 @@ class ReplayBuffer:
 
   
 
-class PIME_DDPG:
+class PIME_TD3:
     """
     PIME = Prior_PI_controller & Integrator & Model Ensemble
     
     [en]
-    An algorithm that uses PID and DDPG.
+    An algorithm that uses PID and TD3 (variation of DDPG).
     
     [pt-br]
-    Um algoritmo que usa um controlador PID e o algoritmo de aprendizado por reforço DDPG.
+    Um algoritmo que usa um controlador PID e o algoritmo de aprendizado por reforço TD3 (variação de DDPG).
     """
 
     def __init__(self, 
@@ -462,6 +527,7 @@ class PIME_DDPG:
                  Kp: np.float64 = 1,                                                   # 
                  Ki: np.float64 = 1,                                                   # 
                  Kd: np.float64 = 0,                                                   # Kd is not used in PIME TD3_DDPG
+                 env_name: str = 'double_water_tank',                                  # string like "x[integer]"
                  tracked_point_name: str = 'x1',                                       # string like "x[integer]"
                  use_GPU: bool = False,                                                # False for CPU, True for GPU
                  logs_folder_path: str = "logs/ppo/",                                  # All logs and outputs will be saved here
@@ -510,6 +576,7 @@ class PIME_DDPG:
                                                 env.unwrapped.error_formula,
                                                 controller_type = pid_type
                                                 )
+            # Used inside ANN class to test PID inside neural network
             batch_PIDController = Batch_PIDController(Kp, Ki, Kd, 
                                                       integrator_bounds, 
                                                       sample_period, 
@@ -527,7 +594,7 @@ class PIME_DDPG:
         self.logs_folder_path = logs_folder_path
 
 
-        # Nota: Ao criar uma nova TerminationRule, é necessário fazer um novo elif que calcula o steps_per_episode em função dessa nova regra.
+        # NOTE: Ao criar uma nova TerminationRule, é necessário fazer um novo elif que calcula o steps_per_episode em função dessa nova regra.
         if env.unwrapped.max_step is not None:
             self.steps_per_episode = env.unwrapped.max_step
         else:
@@ -542,16 +609,17 @@ class PIME_DDPG:
         
         self.device = pyTorch.device("cuda" if use_GPU else "cpu")
         
+        q_lr = mu_lr # TODO: remove rdepois
         self.td3_ddpg = TD3_Agent(
             env.observation_space.shape[0],
             env.action_space.shape[0],
-            agent_action_bounds[1],
+            agent_action_bounds,
             mu_lr, 
             q_lr, 
             target_decay=target_decay, 
             hidden_sizes=[neurons_per_layer, neurons_per_layer, neurons_per_layer],
             pid = batch_PIDController,
-            env_name = "double_water_tank",
+            env_name = env_name,
             is_divided = divide_neural_network,
             activation_function=activation_function_name,
             use_activation_func_in_last_layer=use_activation_func_in_last_layer
@@ -607,7 +675,7 @@ class PIME_DDPG:
                     self.pid_controller.reset()
                     self.td3_ddpg.reset_pid()
                     obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
-                    print(f"reset OBS @@@ {obs=} | {self.env.unwrapped.error=}")
+                    # print(f"reset OBS @@@ {obs=} | {self.env.unwrapped.error=}")
                     done = False # done is updated by termination rule
                     steps_in_episode = 0
                     episode_reward = 0
@@ -618,8 +686,8 @@ class PIME_DDPG:
                 
                         agent_action = self.td3_ddpg.select_action(obs, self.noise, self.noise_clip)
                         
-                        action = agent_action.item()
-                        # action = pi_action + agent_action.item()
+                        # action = agent_action.item()
+                        action = pi_action + agent_action.item()
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         # print(f"NEXT OBS @@@ {next_obs=} | {self.env.unwrapped.error=}")
@@ -653,7 +721,7 @@ class PIME_DDPG:
                     # [uncomment] print(f"last_steps_in_episode={steps_in_episode}")
                     # [uncomment] last_steps_in_episode = steps_in_episode
                     last_episode_reward = episode_reward # Show how well the trained model is performing
-                    returns.append(episode_reward)       # TODO: usar para plotar gráfico de recompensas
+                    returns.append(episode_reward)
 
 
         # [uncomment] counter_divided_by_iterations = total_steps_counter/iterations
@@ -691,20 +759,13 @@ class PIME_DDPG:
             
 
         if (should_save_trained_model):
-           raise NotImplementedError("Saving trained model is not implemented yet.")
-            # self.ppo.save(f"{self.logs_folder_path}/trained_ppo_model")
-
-            # policy_weights = self.ppo.policy.state_dict()
-            # # pyTorch.save(policy_weights, f"{self.logs_folder_path}/trained_ppo_policy_weights.pth")
-            # with open(f"{self.logs_folder_path}/trained_ppo_policy_weights.txt", "w") as f:
-            #     f.write(str(policy_weights)) # Save in plain text
+            self.td3_ddpg.save(self.logs_folder_path)
         
         if (extra_record_only_pid and should_save_records):
             self.record_pid_episode(self.pid_controller, sample_parameters, self.logs_folder_path)
 
         if (extra_record_only_agent and should_save_records):
-           raise NotImplementedError("Extra record only agent is not implemented yet.")
-            # self.record_ppo_episode(sample_parameters)
+            self.record_agent_episode(sample_parameters)
 
         return last_episode_reward
 
@@ -745,37 +806,45 @@ class PIME_DDPG:
     def record_agent_episode(self, 
                             sample_parameters: dict[str, float | int | np.ndarray], 
                             policy_weights: Optional[dict[str, any]] = None
-                           ) -> None:
+                            ) -> None:
         """
         Records the PPO without PID controller response in a single episode and saves it in a csv file.
         """
-        records = []
-        done = False
-        steps_in_episode = 0
-        obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
+        for i in range(10):
+            records = []
+            done = False
+            steps_in_episode = 0
+            obs, truncated = self.env.reset(options = {"ensemble_sample_parameters": sample_parameters})
+            self.pid_controller.reset()
+            self.td3_ddpg.reset_pid()
+            rewards = 0
 
-        # override ppo weights
-        if policy_weights is not None:
-            self.ppo.policy.load_state_dict(policy_weights)
+            # override ppo weights
+            if policy_weights is not None:
+                self.td3_ddpg.load(policy_weights)
 
-        # Execute one episode
-        while not done:
-            ppo_action, next_hidden_state = self.ppo.predict(obs)
-            ppo_action = ppo_action.item()
-            next_obs, reward, done, truncated, info = self.env.step(ppo_action) 
-            steps_in_episode += 1
-            records.append((*obs, ppo_action, reward, self.env.unwrapped.error, steps_in_episode))
+            # Execute one episode
+            while not done:
+                pid_action = self.pid_controller(self.env.unwrapped.error)
+                agent_action = self.td3_ddpg.select_action(obs, 0, None)
+                action = pid_action + agent_action.item()
 
-            obs = next_obs
-        
-        pd.DataFrame(
-            records, 
-            columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
-                    ["y_ref", "z_t", "PPO_action", "reward", "error", "steps_in_episode"]
-        ).to_csv(
-            f"{self.logs_folder_path}/only_ppo_records.csv", 
-            index=False
-        )
+                next_obs, reward, done, truncated, info = self.env.step(action) 
+                steps_in_episode += 1
+                rewards += reward
+
+                records.append((*obs, pid_action, agent_action, action, reward, rewards, self.env.unwrapped.error, steps_in_episode))
+
+                obs = next_obs
+            
+            pd.DataFrame(
+                records, 
+                columns=[f"x{i+1}" for i in range(self.env.unwrapped.x_size)] + \
+                        ["y_ref", "z_t", "PID_action", "agent_action", "combined_action", "reward", "rewards", "error", "steps_in_episode"]
+            ).to_csv(
+                f"{self.logs_folder_path}/trained_agent_records-{i}.csv", 
+                index=False
+            )
         
 
         

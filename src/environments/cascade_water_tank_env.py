@@ -149,7 +149,8 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
     def reset(self, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         obs, _ = super().reset(seed=seed, options=options)
 
-        obs["x1"] = 0
+        # obs["x1"] = 0
+        # obs["x2"] = 0
         
         # 3. Criar o sistema não linear discreto usando `dt=2`
         self.double_tank_system = ct.nlsys(
@@ -228,9 +229,9 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
                                         "dt": ("constant", {"constant": 1}),                 # dt sample time [s]
                                       },
                                       integrator_bounds: tuple[float, float] = (-25, 25),
-                                      ppo_action_bounds: tuple[float, float] = (0, 1),
-                                      ppo_observation_min_bounds: tuple[float, float] = (0, 0),
-                                      ppo_observation_max_bounds: tuple[float, float] = (10, 10),
+                                      agent_action_bounds: tuple[float, float] = (0, 1),
+                                      agent_observation_min_bounds: tuple[float, float] = (0, 0),
+                                      agent_observation_max_bounds: tuple[float, float] = (10, 10),
                                       pid_type: Literal["PID", "PI", "P"] = "PI",
                                       ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
         """ ## Variable Glossary
@@ -272,8 +273,8 @@ class CascadeWaterTankEnv(BaseSetPointEnv):
                         x_start_points         = None, #  [0, 0],
                         tracked_point          = 'x2',
                         integrator_clip_bounds = integrator_bounds,
-                        action_bounds          = ppo_action_bounds,
-                        observation_max_bounds = ppo_observation_max_bounds,
+                        action_bounds          = agent_action_bounds,
+                        observation_max_bounds = agent_observation_max_bounds,
                         )
         env = DictToArrayWrapper(env)
         

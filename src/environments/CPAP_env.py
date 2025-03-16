@@ -274,7 +274,7 @@ class CpapEnv(BaseSetPointEnv):
             exhale_noise = np.random.normal(0, exhale_sigma)
             elapsed_phase_time = current_time - self.start_phase_time
             current_flow = (ventilator.peep - self.last_pause_pressure) / lung._r_aw * np.exp(-elapsed_phase_time / lung._rc) + exhale_noise
-                        
+          
             current_volume = current_volume + current_flow * dt
             
             current_pressure = current_flow * lung._r_aw + current_volume / lung.c_rs + ventilator.peep
@@ -328,6 +328,7 @@ class CpapEnv(BaseSetPointEnv):
             "x6": int(self.phase == 'exhale'),    # Flag de expiração
             "x7": int(self.phase == 'pause'),     # Flag de pausa
             "x8": u_t,                            # last action taken
+            "x9": self.control_filtered,          # last action filtered
         }
     
 
@@ -355,9 +356,9 @@ class CpapEnv(BaseSetPointEnv):
                                 intervals: list[float] = [5000, 5000, 5000],
                                 distributions: dict[str, tuple[str, dict[str, float]]] = None,
                                 integrator_bounds: tuple[float, float] = (-25, 25),
-                                ppo_action_bounds: tuple[float, float] = (-1, 1),
-                                ppo_observation_min_bounds: tuple[float, float] = (-np.inf, -np.inf, -14),
-                                ppo_observation_max_bounds: tuple[float, float] = (np.inf, np.inf, 14),
+                                agent_action_bounds: tuple[float, float] = (-1, 1),
+                                agent_observation_min_bounds: tuple[float, float] = (-np.inf, -np.inf, -14),
+                                agent_observation_max_bounds: tuple[float, float] = (np.inf, np.inf, 14),
                                 pid_type: Literal["PID", "PI", "P"] = "PI",
                                 max_step: int = 30_000,
                                 ) -> tuple[BaseSetPointEnv, Scheduller, EnsembleGenerator, Callable]:
@@ -419,7 +420,7 @@ class CpapEnv(BaseSetPointEnv):
                         error_formula          = ErrorFormula.DIFFERENCE,
                         reward_formula         = RewardFormula.DIFFERENCE_SQUARED,
                         integrator_clip_bounds = integrator_bounds,
-                        action_bounds          = ppo_action_bounds,
+                        action_bounds          = agent_action_bounds,
                         max_step               = max_step,  
                         )
         env = DictToArrayWrapper(env)
