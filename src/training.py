@@ -6,6 +6,7 @@ from save_file_utils import save_hyperparameters_as_json
 def run_training(
         algorithm_class: PIME_PPO | PIME_TD3,
         experiment: dict[str, any], 
+        category: str,
         steps_to_run = 100_000,
         extra_record_only_pid = False,
         should_save_records = False,
@@ -14,10 +15,16 @@ def run_training(
         use_GPU = False
     ) -> None:
 
-    current_date_time = datetime.now().strftime("%d-%m-%H%M")  # Format: day-month-hourminute
-    training_logs_folder_path = experiment["training_logs_folder_path"].format(id=current_date_time)
+
+    training_logs_folder_path = experiment["training_logs_folder_path"]
     create_env_function = experiment["create_env_function"] 
     hyperparameters = experiment["hyperparameters"]
+
+    current_date_time = datetime.now().strftime("%d-%m-%H%M")  # Format: day-month-hourminute
+    training_logs_folder_path = training_logs_folder_path.format(
+        category=category, 
+        id=current_date_time
+    )
 
     env, scheduller, ensemble, trained_pid, pid_optimized_params = create_env_function(
         hyperparameters["seed"],
@@ -50,6 +57,7 @@ def run_training(
         seed=hyperparameters["seed"],
     )
 
+    print(f"Start {algorithm_class.__class__.__repr__} training with {steps_to_run} steps")
     score = controller.train(
         steps_to_run=steps_to_run, 
         extra_record_only_pid=extra_record_only_pid,
@@ -57,3 +65,4 @@ def run_training(
         should_save_trained_model=should_save_trained_model,
         extra_record_only_agent=extra_record_trained_agent
     )
+    print(f"End {algorithm_class.__repr__} training with {steps_to_run} steps")

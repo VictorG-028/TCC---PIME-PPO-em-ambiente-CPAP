@@ -32,9 +32,9 @@ class ANN_divided(nn.Module):
                 use_activation_func_in_last_layer: bool = False
                 ):
         super(ANN_divided, self).__init__()
-        self.set_biases_to_zero()
+        # self.set_biases_to_zero()
 
-        # out_multiplier = 1.0
+        out_multiplier = 30.0
         self.multiplier = pyTorch.tensor(out_multiplier, dtype=pyTorch.float32)
 
         self.pid = pid
@@ -55,8 +55,9 @@ class ANN_divided(nn.Module):
             def error_extractor(input_vector: pyTorch.Tensor):
                     # x1 = input_vector[:, 0].unsqueeze(1)
                     x2 = input_vector[:, 1].unsqueeze(1)
-                    yRef = input_vector[:, 2].unsqueeze(1)
-                    # z_t = input_vector[:, 3].unsqueeze(1)
+                    # x3 = input_vector[:, 2].unsqueeze(1) # last action (u_t)
+                    yRef = input_vector[:, 3].unsqueeze(1)
+                    # z_t = input_vector[:, 4].unsqueeze(1)
                     return yRef - x2 
             self.error_extractor = error_extractor
         elif env_name == "CPAP":
@@ -128,7 +129,7 @@ class ANN_divided(nn.Module):
         # pid_action = self.pid.forward(error)
         # out = out * self.multiplier 
         # out = out + pid_action
-        return out * self.multiplier + self.pid.forward(error)
+        return out * self.multiplier # + self.pid.forward(error)
     
     def reset_pid(self):
         self.pid.reset()
@@ -226,6 +227,7 @@ class ANN(nn.Module):
 
 class TD3_Critic(nn.Module):
   def __init__(self, state_size, num_actions, hidden_sizes, 
+               out_multiplier: int,
                is_divided: bool, 
                pid: Batch_PIDController, 
                env_name: Literal["double_water_tank", "CPAP"],
@@ -234,11 +236,11 @@ class TD3_Critic(nn.Module):
                ):
     super(TD3_Critic, self).__init__()
     if is_divided:
-        self.q1_net = ANN_divided(state_size + num_actions, hidden_sizes, 1, 1.0, pid, env_name, activation_function, use_activation_func_in_last_layer)
-        self.q2_net = ANN_divided(state_size + num_actions, hidden_sizes, 1, 1.0, pid, env_name, activation_function, use_activation_func_in_last_layer)
+        self.q1_net = ANN_divided(state_size + num_actions, hidden_sizes, 1, out_multiplier, pid, env_name, activation_function, use_activation_func_in_last_layer)
+        self.q2_net = ANN_divided(state_size + num_actions, hidden_sizes, 1, out_multiplier, pid, env_name, activation_function, use_activation_func_in_last_layer)
     else:
-        self.q1_net = ANN(state_size + num_actions, hidden_sizes, 1, 1.0, pid, env_name, activation_function, use_activation_func_in_last_layer)
-        self.q2_net = ANN(state_size + num_actions, hidden_sizes, 1, 1.0, pid, env_name, activation_function, use_activation_func_in_last_layer)
+        self.q1_net = ANN(state_size + num_actions, hidden_sizes, 1, out_multiplier, pid, env_name, activation_function, use_activation_func_in_last_layer)
+        self.q2_net = ANN(state_size + num_actions, hidden_sizes, 1, out_multiplier, pid, env_name, activation_function, use_activation_func_in_last_layer)
 
   def forward(self, obs, act):
     t = pyTorch.cat((obs, act), dim=1)
@@ -340,7 +342,16 @@ class TD3_Agent:
                                     # recorder=lambda out: self.ann_recorder(out)
                                 )
         
-        self.q_net       = TD3_Critic(state_size, num_actions, hidden_sizes, is_divided, pid, env_name, activation_function, use_activation_func_in_last_layer)
+        self.q_net       = TD3_Critic(state_size, 
+                                      num_actions, 
+                                      hidden_sizes, 
+                                      self.max_action_bound, 
+                                      is_divided, 
+                                      pid, 
+                                      env_name, 
+                                      activation_function, 
+                                      use_activation_func_in_last_layer
+                                    )
         self.mu_targ_net = SyncNet(self.mu_net)
         self.q_targ_net  = SyncNet(self.q_net)
         print(self.mu_net)
@@ -396,7 +407,7 @@ class TD3_Agent:
             noise = noise.clip(-noise_clip, noise_clip)
         # self.ann_recorder.add_noise(noise)
         action += noise
-        return action.clip(self.min_action_bound, self.max_action_bound)
+        return action # .clip(self.min_action_bound, self.max_action_bound)
 
     def update(self, replay_buffer, iterations, batch_size=100, discount=0.99, policy_noise=0.2, noise_clip=0.5, policy_freq=2):
         """ Train and update actor and critic networks
@@ -686,8 +697,8 @@ class PIME_TD3:
                 
                         agent_action = self.td3_ddpg.select_action(obs, self.noise, self.noise_clip)
                         
-                        # action = agent_action.item()
-                        action = pi_action + agent_action.item()
+                        action = agent_action.item()
+                        # action = pi_action + agent_action.item()
 
                         next_obs, reward, done, truncated, info = self.env.step(action)
                         # print(f"NEXT OBS @@@ {next_obs=} | {self.env.unwrapped.error=}")

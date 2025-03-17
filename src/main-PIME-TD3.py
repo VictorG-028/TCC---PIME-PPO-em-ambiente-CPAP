@@ -8,6 +8,7 @@ from environments.CPAP_env import CpapEnv
 from environments.cascade_water_tank_env import CascadeWaterTankEnv
 from environments.ph_control_env import PhControl
 
+from run_PID_only_episode import run_PID_only_episode
 from training import run_training
 from optuna_training import run_optuna
 
@@ -20,11 +21,11 @@ locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8') # show date and time in portugues
 experiments = {
     'double_water_tank': {
         "create_env_function": CascadeWaterTankEnv.create_water_tank_environment,
-        "training_logs_folder_path": "logs/TD3_DDPG/double_water_tank/final/{id}",
+        "training_logs_folder_path": "logs/TD3_DDPG/double_water_tank/{category}/{id}",
         "best_results_folder_path": "logs/TD3_DDPG/double_water_tank/best/",
 
         "hyperparameters": {
-            "extra info": "função de simulação control", # "função de simulação usando biblioteca control",
+            "extra info": "função de simulação control",
             "seed": 42,
             "PIME": {
                 ## TD3_DDPG
@@ -39,7 +40,7 @@ experiments = {
                 "noise_clip": 0.05,
                 "ensemble_size": 100,
                 "divide_neural_network": True,
-                "neurons_per_layer": 6,
+                "neurons_per_layer": 42,
                 "activation_function_name": "tanh", # "no activation" "relu" "tanh"
                 "use_activation_func_in_last_layer": False,
 
@@ -55,13 +56,13 @@ experiments = {
             },
             "PID_and_Env": {
                 "integrator_bounds": (-25, 25),
-                "agent_action_bounds": (-30, 30),              # [V]
-                "agent_observation_min_bounds": (0, 0),     # [cm, cm]
-                "agent_observation_max_bounds": (10, 10),   # [cm, cm]
+                "agent_action_bounds": (-30, 30),          # [V]
+                "agent_observation_min_bounds": (0, 0),    # [cm, cm, V]
+                "agent_observation_max_bounds": (10, 10),  # [cm, cm, V]
                 "pid_type": "PI",
             },
             ## Scheduller
-            "set_points": [3,6,9,4,2], # [cm]
+            "set_points": [5,2,6,8,3], # [3,6,9,4,2], # [cm]
             "intervals": [400, 400, 400, 400, 400], # [s]
 
             ## Model Ensemble
@@ -154,20 +155,27 @@ with open("./terminal_outputs.txt", 'w') as f:
 
     # sys.stdout = f
 
+    # run_PID_only_episode(
+    #     experiments["double_water_tank"],
+    #     should_save_records=True
+    # )
+
     run_training(
         PIME_TD3,
-        experiments["double_water_tank"], 
+        experiments["double_water_tank"],
+        category = "final", 
         steps_to_run=400_000,
         should_save_records=True,
-        extra_record_only_pid=True,
-        should_save_trained_model=True,
-        extra_record_trained_agent=True,
+        extra_record_only_pid=False,
+        should_save_trained_model=False,
+        extra_record_trained_agent=False,
         use_GPU=False
     )
 
     # run_training(
     #     PIME_TD3,
     #     experiments["CPAP"], 
+    #     category = "final_2", 
     #     steps_to_run=400_000,
     #     should_save_records=True,
     #     extra_record_only_pid=False,

@@ -13,6 +13,7 @@ from save_file_utils import create_dir_if_not_exists, create_textfile_if_not_exi
 def run_optuna(
         algorithm_class: PIME_PPO | PIME_TD3,
         experiment: dict[str, any], 
+        category: str = "optuna",
         steps_to_run = 100_000,
         extra_record_only_pid = False,
         should_save_records = False,
@@ -95,6 +96,7 @@ def run_optuna(
 
         current_date_time = datetime.now().strftime("%d-%m-%H%M")  # Format: day-month-hourminute
         trial_logs_folder_path = experiment['training_logs_folder_path'].format(
+                                    category=category,
                                     id=current_date_time
                                 ) + f"-optuna-trial_{trial.number}"
 

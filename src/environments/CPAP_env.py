@@ -100,15 +100,15 @@ class CpapEnv(BaseSetPointEnv):
         # Definindo o espaço de observações (flow [l / min], volume [ml], pressure [cmH2O])
         self.observation_space = spaces.Dict({
             "x1": spaces.Box(low=-1700, high=350, shape=(1,), dtype=np.float64),  # flow [ml /s] (valores low/high extremo considerando fluxo de ar negativo/positivo durante expiração forçada)
-            "x2": spaces.Box(low=0, high=400, shape=(1,), dtype=np.float64),     # volume [ml] (400 ml é a quantidade de ar inserido pelo CPAP)
-            "x3": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),    # pressure [cmH2O] (-20 é um valor extremo durante expiração e 60 é um valor extremo durante ventilação mecânica)
-            "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),  # last pressure [cmH2O]
-            "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de inspiração [0 ou 1]
-            "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de expiração [0 ou 1]
-            "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),     # Flag de pausa [0 ou 1]
-            "x8": self.action_space,                                           # last action taken [-1 até +1]
-            "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),   # set point pressure [cmH2O] (60 é valor extremo durante ventilação mecânica)
-            "z_t": spaces.Box(low=0, high=25, shape=(1,), dtype=np.float64)      # Acumulador de erro [cmH2O]
+            "x2": spaces.Box(low=0, high=400, shape=(1,), dtype=np.float64),      # volume [ml] (400 ml é a quantidade de ar inserido pelo CPAP)
+            "x3": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),       # pressure [cmH2O] (-20 é um valor extremo durante expiração e 60 é um valor extremo durante ventilação mecânica)
+            "x4": spaces.Box(low=-20, high=60, shape=(1,), dtype=np.float64),     # last pressure [cmH2O]
+            "x5": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),        # Flag de inspiração [0 ou 1]
+            "x6": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),        # Flag de expiração [0 ou 1]
+            "x7": spaces.Box(low=0, high=1, shape=(1,), dtype=np.float64),        # Flag de pausa [0 ou 1]
+            "x8": self.action_space,                                              # last action taken [-1 até +1]
+            "y_ref": spaces.Box(low=0, high=60, shape=(1,), dtype=np.float64),    # set point pressure [cmH2O] (60 é valor extremo durante ventilação mecânica)
+            "z_t": spaces.Box(low=0, high=25, shape=(1,), dtype=np.float64)       # Acumulador de erro [cmH2O]
         })
 
     

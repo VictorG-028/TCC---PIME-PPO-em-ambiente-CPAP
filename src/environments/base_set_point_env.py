@@ -203,6 +203,7 @@ class BaseSetPointEnv(gymnasium.Env):
 
         # Remove os dois últimos valores (y_ref e z_t)
         random_sample.pop("y_ref", None)
+        # random_sample.pop("e_t", None)
         random_sample.pop("z_t", None)
 
         random_x_vector = {
@@ -219,7 +220,6 @@ class BaseSetPointEnv(gymnasium.Env):
         self.set_ensemble_params(options["ensemble_sample_parameters"])
 
         self.setpoint = self.scheduller.get_set_point_at(step=0)
-        self.cummulative_error = 0
 
         # Generate vector x values (x_1, ..., x_n)
         if self.x_start_points:
@@ -229,15 +229,17 @@ class BaseSetPointEnv(gymnasium.Env):
         else:
             x_values = self.generate_x_vector_randomly()
 
-        self.observation = {
-            **x_values,
-            "y_ref": self.setpoint,
-            "z_t": 0
-        }
         self.error = self.error_formula(y_ref=self.setpoint, y=x_values[self.tracked_point])
+        self.cummulative_error = self.error
         self.reward = self.reward_formula(y_ref=self.setpoint, y=x_values[self.tracked_point])
         self.done = False
         self.truncated = {}
+        self.observation = {
+            **x_values,
+            "y_ref": self.setpoint,
+            # "e_t": self.error,
+            "z_t": self.cummulative_error,
+        }
 
         self.timestep = 0
 
@@ -267,6 +269,7 @@ class BaseSetPointEnv(gymnasium.Env):
         self.observation = {
             **x_vector,
             "y_ref": self.setpoint,
+            # "e_t": self.error,
             "z_t": self.cummulative_error,
         }
         # print(f"{self.observation=}")
